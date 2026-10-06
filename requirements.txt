@@ -1,0 +1,4 @@
+# تثبيت صارم (Tech Lead 2026-10): منع سحب pandas 3.x الكاسرة عند أي redeploy
+pandas==2.3.3
+numpy==2.4.6
+requests==2.34.2
