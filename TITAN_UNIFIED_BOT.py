@@ -171,6 +171,9 @@ except Exception as e:
     WORKSPACE_DIR = SCRIPT_DIR
     STATE_FILE = os.path.join(SCRIPT_DIR, "bot_state_v241.json")
 
+# [SPAM-FIX] ملف ذري صغير لإزاحة تيليجرام — تثبيت فوري لمنع إعادة تسليم التحديثات بعد أي إعادة تشغيل
+TG_OFFSET_FILE = os.path.join(WORKSPACE_DIR, "tg_offset.txt")
+
 GOLDEN_ASSETS = GS_ENGINE.GOLDEN_APPROVED_COINS if HAS_UNIFIED else []
 TITAN_ASSETS = ['SOL','FET','DOT','XRP','BNB','ETH','XLM','HBAR','TRX','LINK','ADA','LTC','DOGE','ARB','BCH','ETC','EOS','ZEC','BTC','AVAX']
 ALL_DATA_ASSETS = list(set([a+"USDT" if not a.endswith("USDT") else a for a in GOLDEN_ASSETS + TITAN_ASSETS] + ["BTCUSDT"]))
@@ -3706,8 +3709,18 @@ def handle_update(upd: dict):
 def boot_welcome_admin():
     st = load_state()
     aid = st.get("admin_chat_id") or ADMIN_CHAT_ID
-    if aid:
-        send_msg(aid, f"✅ البوت يعمل\n{STRATEGY_PROVENANCE}", more_kb())
+    if not aid:
+        return
+    # [SPAM-FIX] ترحيب الإقلاع idempotent: لا تكرار خلال فجوة دنيا (12 ساعة افتراضي) مهما تكررت إعادات التشغيل
+    now_t = time.time()
+    min_gap = float(os.environ.get("TITAN_BOOT_MSG_MIN_HOURS", "12")) * 3600.0
+    last_at = float(st.get("boot_welcome_last_at", 0.0) or 0.0)
+    if now_t - last_at < min_gap:
+        log(f"[BOOT] ترحيب الإقلاع مكبوت (أُرسل قبل {(now_t - last_at) / 60.0:.0f} دقيقة — مانع تكرار الرسائل)")
+        return
+    st["boot_welcome_last_at"] = now_t
+    save_state()
+    send_msg(aid, f"✅ البوت يعمل\n{STRATEGY_PROVENANCE}", more_kb())
 
 UPDATE_EXECUTOR = ThreadPoolExecutor(max_workers=20, thread_name_prefix="tg_fast")
 
@@ -3717,9 +3730,35 @@ def _safe_dispatch_update(upd: dict):
     except Exception as e:
         log(f"[POLL_DISPATCH] خطأ: {e}\n{traceback.format_exc()}")
 
+# [SPAM-FIX] تثبيت/استرجاع إزاحة تيليجرام بملف ذري صغير — بدونها تعيد تيليجرام تسليم تحديثات قديمة بعد كل إعادة تشغيل
+def _persist_tg_offset(offset: int):
+    """تثبيت فوري للإزاحة (tmp+replace ذري) — لا يعتمد على دورة save_state البعيدة"""
+    try:
+        tmp = TG_OFFSET_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(str(int(offset)))
+        os.replace(tmp, TG_OFFSET_FILE)
+    except Exception as e:
+        log(f"[POLL] ⚠️ تعذر تثبيت tg_offset: {e}")
+
+def _load_tg_offset(st: dict) -> int:
+    """أكبر قيمة بين ملف الإزاحة والحالة — رجوع للخلف = إعادة تسليم تحديثات = رسائل مكررة"""
+    file_off = 0
+    try:
+        if os.path.exists(TG_OFFSET_FILE):
+            with open(TG_OFFSET_FILE) as f:
+                file_off = int((f.read() or "0").strip() or 0)
+    except Exception:
+        file_off = 0
+    try:
+        st_off = int(st.get("tg_offset") or 0)
+    except Exception:
+        st_off = 0
+    return max(st_off, file_off)
+
 def poll_loop():
     st = load_state()
-    offset = st.get("tg_offset")
+    offset = _load_tg_offset(st)  # [SPAM-FIX] استرجاع متين بعد أي إعادة تشغيل
     while True:
         try:
             params = {"timeout": 20, "allowed_updates": ["message", "callback_query"]}
@@ -3735,6 +3774,7 @@ def poll_loop():
                 UPDATE_EXECUTOR.submit(_safe_dispatch_update, upd)
             if ups:
                 _STATE["tg_offset"] = offset
+                _persist_tg_offset(offset)  # [SPAM-FIX] تثبيت فوري لكل دفعة — لا نافذة لفقد التأكيد
         except Exception as e:
             log(f"[POLL] خطأ الحلقة: {e}")
             time.sleep(2)

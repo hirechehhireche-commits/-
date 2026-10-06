@@ -22,7 +22,11 @@ except ImportError:  # الحماية ضد بيئة ناقصة — القناة 
 
 GITHUB_TOKEN = (os.environ.get("GITHUB_TOKEN") or "").strip()
 GITHUB_REPO = (os.environ.get("GITHUB_REPO") or "").strip()  # owner/repo
-GITHUB_BRANCH = (os.environ.get("GITHUB_BRANCH") or "main").strip() or "main"
+# [BRANCH-FIX] كسر حلقة Auto-Deploy: الحفظ يذهب لفرع بيانات مخصص يُنشأ آلياً —
+# Render يراقب main وحده، فكوميتات اللقطات يجب ألا تلمس main أبداً.
+# اللقطات القديمة على main تُقرأ عند الاسترجاع كتراجع استمرارية.
+GITHUB_BRANCH = (os.environ.get("GITHUB_BRANCH") or "titan-data").strip() or "titan-data"
+LEGACY_BRANCH = "main"
 SYNC_ENABLED = (os.environ.get("TITAN_GIT_SYNC") or "on").strip().lower() not in ("off", "0", "false")
 
 STATE_REMOTE = "titan-state.json"
@@ -51,6 +55,7 @@ class TitanGitHubSync:
         self._cv = threading.Condition()
         self._pushed_hash = {}        # remote_name -> last pushed sha256 (خصم التكرار)
         self._last_push = {}          # remote_name -> epoch آخر رفع ناجح
+        self._branch_ready = None     # [BRANCH-FIX] None=لم يُفحص | True=الفرع جاهز
         self.stats = {"pushed": 0, "skipped_dup": 0, "errors": 0}
         self._thread = None
 
@@ -92,27 +97,72 @@ class TitanGitHubSync:
             return False
         return self.push(LIVE_REMOTE, blob_bytes, urgent=urgent)
 
-    # ---------------- الاسترجاع عند الإقلاع ----------------
-    def _fetch_remote(self, remote_name: str):
-        """يرجع raw bytes أو None (لا يرفع استثناءات نحو الخارج أبداً)."""
-        if not _ready():
-            return None
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{remote_name}"
+    # ---------------- الفرع المخصص للبيانات (كسر حلقة Auto-Deploy) ----------------
+    def _ensure_branch(self) -> bool:
+        """[BRANCH-FIX] ينشئ فرع البيانات آلياً من رأس الفرع الافتراضي عند غيابه.
+        لا يرفع استثناءات أبداً، ولا يعدّل main إطلاقاً (قراءات رؤوس الفروع فقط)."""
+        if GITHUB_BRANCH == LEGACY_BRANCH:
+            self._branch_ready = True
+            return True
+        if self._branch_ready:
+            return True
         headers = {
             "Authorization": f"Bearer {GITHUB_TOKEN}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        base = f"https://api.github.com/repos/{GITHUB_REPO}"
         try:
-            r = requests.get(url, headers=headers, params={"ref": GITHUB_BRANCH}, timeout=_TIMEOUT)
+            r = requests.get(f"{base}/git/ref/heads/{GITHUB_BRANCH}", headers=headers, timeout=_TIMEOUT)
             if r.status_code == 200:
-                return base64.b64decode(r.json().get("content", ""))
-            if r.status_code == 404:
-                self._log(f"[GIT-SYNC] ℹ️ {remote_name} غير موجود في الريبو (أول تشغيل)")
+                self._branch_ready = True
+                return True
+            # الفرع غائب ⟵ اجلب رأس default_branch ثم أنشئ refs/heads/<فرع-البيانات>
+            repo = requests.get(base, headers=headers, timeout=_TIMEOUT)
+            default_head = LEGACY_BRANCH
+            if repo.status_code == 200:
+                default_head = (repo.json().get("default_branch") or LEGACY_BRANCH).strip() or LEGACY_BRANCH
+            h = requests.get(f"{base}/git/ref/heads/{default_head}", headers=headers, timeout=_TIMEOUT)
+            if h.status_code == 200:
+                sha = (h.json().get("object") or {}).get("sha")
+                if sha:
+                    pr = requests.post(f"{base}/git/refs", headers=headers,
+                                       json={"ref": f"refs/heads/{GITHUB_BRANCH}", "sha": sha}, timeout=_TIMEOUT)
+                    if pr.status_code in (200, 201):
+                        self._log(f"[GIT-SYNC] 🌿 أُنشئ فرع البيانات {GITHUB_BRANCH} من {default_head} — كوميتات اللقطات لن تلمس main بعد اليوم")
+                        self._branch_ready = True
+                        return True
+                    self._log(f"[GIT-SYNC] ⚠️ إنشاء فرع {GITHUB_BRANCH}: HTTP {pr.status_code}: {pr.text[:120]}")
             else:
-                self._log(f"[GIT-SYNC] ⚠️ fetch {remote_name}: HTTP {r.status_code}: {r.text[:120]}")
+                self._log(f"[GIT-SYNC] ⚠️ تعذر قراءة رأس {default_head}: HTTP {h.status_code}")
         except Exception as e:
-            self._log(f"[GIT-SYNC] ⚠️ fetch {remote_name} err: {e}")
+            self._log(f"[GIT-SYNC] ⚠️ فحص/إنشاء فرع {GITHUB_BRANCH}: {e}")
+        return False
+
+    # ---------------- الاسترجاع عند الإقلاع ----------------
+    def _fetch_remote(self, remote_name: str):
+        """يرجع raw bytes أو None. [BRANCH-FIX] يقرأ فرع البيانات أولاً ثم main التراجعي
+        (استمرارية اللقطات المنشورة قبل هذا الإصلاح) — لا يرفع استثناءات أبداً."""
+        if not _ready():
+            return None
+        headers = {
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        branches = [GITHUB_BRANCH] if GITHUB_BRANCH == LEGACY_BRANCH else [GITHUB_BRANCH, LEGACY_BRANCH]
+        for branch in branches:
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{remote_name}"
+            try:
+                r = requests.get(url, headers=headers, params={"ref": branch}, timeout=_TIMEOUT)
+                if r.status_code == 200:
+                    if branch != GITHUB_BRANCH:
+                        self._log(f"[GIT-SYNC] ℹ️ استرجاع {remote_name} من لقطة {branch} القديمة (ما قبل فرع البيانات)")
+                    return base64.b64decode(r.json().get("content", ""))
+                if r.status_code != 404:
+                    self._log(f"[GIT-SYNC] ⚠️ fetch {remote_name}@{branch}: HTTP {r.status_code}: {r.text[:120]}")
+            except Exception as e:
+                self._log(f"[GIT-SYNC] ⚠️ fetch {remote_name}@{branch} err: {e}")
         return None
 
     @staticmethod
@@ -185,10 +235,11 @@ class TitanGitHubSync:
             return False
         if self._thread and self._thread.is_alive():
             return True
+        self._ensure_branch()  # [BRANCH-FIX] جاهزية فرع البيانات مرة واحدة قبل أول نشر
         self._thread = threading.Thread(target=self._worker, daemon=True, name="git-sync")
         self._thread.start()
         self._log(f"[GIT-SYNC] ✅ قناة الحفظ نشطة → {GITHUB_REPO}@{GITHUB_BRANCH} "
-                  f"(خنق {MIN_PUSH_GAP_SEC:.0f}s/{EVENT_PUSH_GAP_SEC:.0f}s)")
+                  f"(خنق {MIN_PUSH_GAP_SEC:.0f}s/{EVENT_PUSH_GAP_SEC:.0f}s — main لا يُلمس ⟵ لا Auto-Deploy)")
         return True
 
     def _worker(self):
@@ -211,6 +262,7 @@ class TitanGitHubSync:
         if self._pushed_hash.get(name) == h:  # خصم تكرار أخير قبل الطلب
             self.stats["skipped_dup"] += 1
             return
+        self._ensure_branch()  # [BRANCH-FIX] شبكة أمان: لا نشر قبل جاهزية الفرع (ولا يحوّل لـ main أبداً عند فشله)
         wait = self._last_push.get(name, 0) + gap - time.time()
         if wait > 0:
             time.sleep(wait)  # الخنق يحدث في الخيط الخامل فقط — لا يحظر أي مسار تداول
