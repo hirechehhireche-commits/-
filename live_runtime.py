@@ -390,7 +390,13 @@ def callback(cb,u):
         elif data=='api:del':
             EXEC.disconnect(uid);B.respond_cb(cb,'🗑️ حُذف الربط بعد التأكد من عدم وجود مراكز نشطة.',keyboard(u))
         elif data=='api:bal':
-            bals=EXEC.client(account(uid)).balances()
+            try:
+                bals=EXEC.client(account(uid)).balances()
+            except Exception as _be:
+                # [BAL-FIX] اعرض سبب الفشل الحقيقي — "لا يمكن الجلب" ≠ "حساب فارغ"
+                B.log(f'[BAL] تعذر جلب أرصدة الحساب {uid}: {_be}')
+                B.respond_cb(cb, f'⚠️ {B.esc(str(_be)[:500])}', keyboard(u))
+                return
             pos_text = '\n'.join(f'{B.esc(s)}: {q}' for s,q in sorted(bals.items()) if q>0 and (q >= 0.0001 or s in ('USDT','BTC','ETH','BNB','SOL')))
             text = '💼 <b>الأرصدة الحرة على Binance</b>\n' + (pos_text if pos_text else '• لا توجد أرصدة حرة تفوق الصفر حالياً.')
             try:

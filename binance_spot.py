@@ -179,18 +179,31 @@ class BinanceSpot:
         return a
 
     def balances(self):
-        for ep in [self.base] + [h for h in self.ENDPOINTS if h != self.base]:
-            self.base = ep
-            try:
-                res = self.request('GET', '/api/v3/account')
-                if isinstance(res, dict) and 'balances' in res:
-                    return {x['asset']: D(x['free']) for x in res['balances']}
-            except Exception as e:
-                err_str = str(e)
-                if any(bad in err_str for bad in ('-2014', '-2015', 'غير صحيح')):
-                    raise ValueError('مفتاح API غير صالح')
-                continue
-        return {}
+        mirrors = list(dict.fromkeys([self.base] + self.ENDPOINTS))
+        last_err = None
+        for sweep in range(2):  # [BAL-FIX] مسح إضافي قصير يلتقط موجات الضغط العابرة على الـ IP المشترك
+            for ep in mirrors:
+                self.base = ep
+                try:
+                    res = self.request('GET', '/api/v3/account')
+                    if isinstance(res, dict) and 'balances' in res:
+                        return {x['asset']: D(x['free']) for x in res['balances']}
+                except Exception as e:
+                    err_str = str(e)
+                    last_err = err_str
+                    if any(bad in err_str for bad in ('-2014', '-2015', 'غير صحيح')):
+                        raise ValueError('مفتاح API غير صالح')
+                    if '-1021' in err_str:  # انحراف ساعة الخادم — أعد مزامنة الوقت واستمر
+                        try:
+                            self.clock_at = 0
+                            self.sync_time()
+                        except Exception:
+                            pass
+                    continue
+            if sweep == 0:
+                time.sleep(0.8)
+        # [BAL-FIX] لا صمت بعد الآن: فشل الجلب خطأ صريح يُعرَف — وليس رصيداً فارغاً وهمياً
+        raise ValueError(f'تعذّر جلب أرصدة Binance حالياً (آخر فشل: {str(last_err)[:100]}) — رصيدك الحقيقي لم يتغير؛ جرّب الزر بعد دقيقة. إن تكرر الخطأ فالسبب غالباً ضغط الـ IP المشترك للخادم على Binance.')
 
     def price(self, symbol):
         # استخدام vision أولاً لتوفير وزن طلبات التداول والحفاظ على استقرار السيرفر
