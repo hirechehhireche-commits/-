@@ -116,6 +116,11 @@ class BinanceSpot:
                     last_error = ExchangeError(f'{code} (كثرة الطلبات - Binance مشغول)', True)
                     continue
 
+                # [GEO-FIX] حظر جغرافي 451 على النقاط الموقّعة: سببه IP الخادم لا المفاتيح،
+                # والمرايا لا تنفع لأنها تشارك الـ IP نفسه — اسمِّ الخطأ باسمه فوراً بدل ابتلاع code=0
+                if resp.status_code == 451 or 'restricted location' in msg:
+                    raise ExchangeError('451-GEO: IP الخادم في موقع محجوب جغرافياً عن Binance Spot (restricted location)', False)
+
                 last_error = ExchangeError(code, resp.status_code >= 500 or code in (-1000, -1006, -1007))
 
             except requests.RequestException:
@@ -203,6 +208,8 @@ class BinanceSpot:
             if sweep == 0:
                 time.sleep(0.8)
         # [BAL-FIX] لا صمت بعد الآن: فشل الجلب خطأ صريح يُعرَف — وليس رصيداً فارغاً وهمياً
+        if '451-GEO' in str(last_err) or 'restricted location' in str(last_err):
+            raise ValueError('سيرفر البوت محجوب جغرافياً من Binance (451: restricted location) — الأرصدة الموقّعة لا تُقرأ من هذا الـ IP أياً كانت المفاتيح. الحل: انشر الخدمة في منطقة مدعومة (فرانكفورت / أوروبا) ثم أعد المحاولة — رصيدك لم يتغير.')
         raise ValueError(f'تعذّر جلب أرصدة Binance حالياً (آخر فشل: {str(last_err)[:100]}) — رصيدك الحقيقي لم يتغير؛ جرّب الزر بعد دقيقة. إن تكرر الخطأ فالسبب غالباً ضغط الـ IP المشترك للخادم على Binance.')
 
     def price(self, symbol):
