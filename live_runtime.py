@@ -103,14 +103,18 @@ def panel(u):
     trade_icon = "🟢 مفعّل" if a.get('enabled') else "🔴 متوقف"
     if a.get('credential') and EXEC:
         try:
-            total_eq, free, used = EXEC.get_total_equity(a, EXEC.client(a))
+            _bals = EXEC.client(a).balances()
+            total_eq, free, used = EXEC.get_total_equity(a, EXEC.client(a), cached_bals=_bals)
             equity_info = (
                 f"━━━━━━━━━━━━━━\n"
                 f"📊 <b>رصيدك الحقيقي:</b>\n"
                 f"• الإجمالي: <b>{total_eq:.2f} USDT</b>\n"
                 f"• الحر: {free:.2f} | المستخدم: {used:.2f}\n"
             )
-        except Exception: pass
+        except Exception as _e:
+            # [BAL-DISPLAY-FIX] لا أصفار كاذبة بعد الآن: فشل الجلب يظهر سبباً حقيقياً وليس رقماً وهمياً
+            B.log(f'[BAL] تعذر جلب رصيد لوحة الحساب {u.get("id")}: {_e}')
+            equity_info = f"━━━━━━━━━━━━━━\n⚠️ تعذّر جلب رصيدك الآن — السبب: {B.esc(str(_e)[:200])}\n"
     # نص مختصر وصادق يطابق الواقع
     if not a.get('credential'):
         return (
