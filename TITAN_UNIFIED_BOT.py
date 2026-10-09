@@ -201,10 +201,10 @@ DELISTED_OR_INACTIVE = {
 
 SIGNAL_BOT_VERSION = "بوت تداول هادئ"
 BOT_VERSION = "بوت تداول طيب - نسخة صادقة"
-STRATEGY_ID = "simple-dual-1m-5m"
-STRATEGY_PROVENANCE = "بوت تداول ذكي — 1 دقيقة + 5 دقائق"
+STRATEGY_ID = "micro-hedge-fund"
+STRATEGY_PROVENANCE = "Micro Hedge Fund — SOP $125/$400/$8/$24 (تأكيد ثلاثي D1/H4)"
 
-POOL_NAMES = {"P1": "مجموعة 1", "P2": "مجموعة 2", "P3": "مجموعة 3", "S2": "اتجاه", "GS": "ذهبي — 58 عملة", "GS-T1": "ذهبي 1", "GS-T2": "ذهبي 2", "GS-T3": "ذهبي 3", "GS-T4": "ذهبي 4"}
+POOL_NAMES = {"P1": "مجموعة 1", "P2": "مجموعة 2", "P3": "مجموعة 3", "S2": "اتجاه", "GS": "ذهبي — 58 عملة", "GS-T1": "ذهبي 1", "GS-T2": "ذهبي 2", "GS-T3": "ذهبي 3", "GS-T4": "ذهبي 4", "MHF": "مصغّر التحوط"}
 POOL_PARAMS_MAP = {
     "P1": {"t1_frac": 0.50, "t2_frac_of_rest": 0.50},
     "P2": {"t1_frac": 0.40, "t2_frac_of_rest": 0.60},
@@ -217,8 +217,20 @@ POOL_PARAMS_MAP = {
     "GS-T4": {"t1_frac": 0.50, "t2_frac_of_rest": 1.0},
     "GS-V5-ULTRA": {"t1_frac": 0.50, "t2_frac_of_rest": 1.0},
     "V5-ULTRA": {"t1_frac": 0.50, "t2_frac_of_rest": 1.0},
+    "MHF": {"t1_frac": 0.50, "t2_frac_of_rest": 1.0},          # [MHF-INTEGRATION] مصغّر التحوط — SOP
 }
 POOL_WEIGHT_OF_TOTAL = {"P1": 0.35, "P2": 0.15, "P3": 0.12, "S2": 0.20, "GS": 0.38}
+
+# [MHF-INTEGRATION] جسر Micro Hedge Fund — المصدر الوحيد لخطط الدخول (TITAN_MHF=0 للتعطيل الكامل والرجوع للمحرك القديم)
+MHF_ENABLED = (os.environ.get("TITAN_MHF", "1").strip() != "0")
+MHF_BRIDGE = None
+if MHF_ENABLED:
+    try:
+        from mhf_bridge import MHFBridge as _MHFBridge
+        MHF_BRIDGE = _MHFBridge(state_dir=os.path.join(os.path.dirname(os.path.abspath(STATE_FILE)), "mhf_state"))
+    except Exception as _mhf_boot_e:
+        print(f"[MHF-INTEGRATION] ⚠️ تعذّر تهيئة جسر MHF: {_mhf_boot_e} — الرجوع إلى المحرك القديم", flush=True)
+        MHF_ENABLED = False
 
 BINANCE_HOSTS = [
     "https://data-api.binance.vision",
@@ -2322,6 +2334,13 @@ def run_cycle(reason: str = "scheduled"):
         for sell in sell_plans:
             update_position_after_sell(sell["position_id"], sell["sell_type"], sell["current_price"], sell.get("reason", ""))
         LATEST_SELL_PLANS = sell_plans
+
+        # [MHF-INTEGRATION] مزامنة إغلاقات صفقات MHF الورقية إلى سجل المحرك (قاطعات الحماية تعتمد عليها)
+        if MHF_ENABLED and MHF_BRIDGE is not None:
+            try:
+                MHF_BRIDGE.sync_closed_positions(load_state().get("open_positions", []))
+            except Exception as _mhf_sync_e:
+                log(f"[MHF SYNC ERROR] {_mhf_sync_e}")
         
         # 3. تشغيل المحرك وفحص فرص الشراء الحقيقية وفق استراتيجية V5 Ultra
         res = run_unified_engine(store)
@@ -2333,6 +2352,11 @@ def run_cycle(reason: str = "scheduled"):
         # 4. فلترة إشارات الشراء بالبصمة الذكية — الجديد فقط!
         raw_buy_plans = res.get("entry_plans", [])
         new_buy_plans, dup_count = filter_new_buy_signals(raw_buy_plans)
+
+        # [MHF-INTEGRATION] المصدر الوحيد للدخول: خطط Micro Hedge Fund (SOP $125/$400) تحل محل خطط المحرك القديم
+        if MHF_ENABLED and MHF_BRIDGE is not None:
+            _mhf_open_syms = [p.get("ticker") for p in st.get("open_positions", []) if p.get("status") == "OPEN"]
+            new_buy_plans = MHF_BRIDGE.scan_plans(open_symbols=_mhf_open_syms)
         
         # 🛡️ فحص صمام الأمان والإنقاذ (Fail-Safe Emergency Breaker)
         can_trade, breaker_reason = BREAKER.can_open_new_trade()
