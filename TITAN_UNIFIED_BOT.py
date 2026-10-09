@@ -201,6 +201,8 @@ DELISTED_OR_INACTIVE = {
 
 SIGNAL_BOT_VERSION = "بوت تداول هادئ"
 BOT_VERSION = "بوت تداول طيب - نسخة صادقة"
+# [MHF-INTEGRATION] وسم بناء مرئي — أثبت للمستخدم في الواجهة أن النسخة المنشورة حديثة بالفعل
+BUILD_TAG = "MHF-UI v2.4 · 2026-10-09"
 STRATEGY_ID = "micro-hedge-fund"
 STRATEGY_PROVENANCE = "Micro Hedge Fund — SOP $125/$400/$8/$24 (تأكيد ثلاثي D1/H4)"
 
@@ -224,10 +226,13 @@ POOL_WEIGHT_OF_TOTAL = {"P1": 0.35, "P2": 0.15, "P3": 0.12, "S2": 0.20, "GS": 0.
 # [MHF-INTEGRATION] جسر Micro Hedge Fund — المصدر الوحيد لخطط الدخول (TITAN_MHF=0 للتعطيل الكامل والرجوع للمحرك القديم)
 MHF_ENABLED = (os.environ.get("TITAN_MHF", "1").strip() != "0")
 MHF_BRIDGE = None
+MHF_WHITELIST_N = 0
 if MHF_ENABLED:
     try:
         from mhf_bridge import MHFBridge as _MHFBridge
+        import micro_hedge_fund as _MHF
         MHF_BRIDGE = _MHFBridge(state_dir=os.path.join(os.path.dirname(os.path.abspath(STATE_FILE)), "mhf_state"))
+        MHF_WHITELIST_N = len(_MHF.WHITELIST)
     except Exception as _mhf_boot_e:
         print(f"[MHF-INTEGRATION] ⚠️ تعذّر تهيئة جسر MHF: {_mhf_boot_e} — الرجوع إلى المحرك القديم", flush=True)
         MHF_ENABLED = False
@@ -701,26 +706,27 @@ WELCOME_TEXT = (
 
 ABOUT_TEXT = (
     "عن البوت 💵\n\n"
-    "يتابع السوق كل دقائق على مدار الساعة\n"
-    f"يراقب {len(ALL_DATA_ASSETS)} عملة نشطة منتقاة بعناية\n"
+    "يتابع السوق على مدار الساعة\n"
+    f"يمسح {MHF_WHITELIST_N or 90} زوج USDT دورياً ويفلترها\n"
     "يفلتر العملات القوية فقط ويتجاهل الضعيفة\n\n"
-    "استراتيجية V5 Ultra 📈\n"
-    "• فريم 5 دقائق للاتجاه العام\n"
-    "• فريم 1 دقيقة للدخول المجهري\n"
-    "• EMA + RSI + اختراق ذكي\n"
-    "• دخول بهدوء مع وقف واضح\n"
-    "• هدفين متدرجين لجني الربح\n\n"
-    "إدارة مخاطر 🛡️\n"
-    "• وقف خسارة محكم لكل صفقة\n"
-    "• لا يدخل عند تقلب شديد\n"
-    "• يحمي المحفظة عند هبوط السوق\n"
-    "• نظام بصمة ذكية يمنع التكرار\n\n"
+    "استراتيجية مصغّر التحوط — Micro Hedge Fund 📈\n"
+    "• فلتر زخم أسبوعي وسيولة لاختيار المرشح\n"
+    "• فحص نشاط وعمق السوق قبل أي دخول\n"
+    "• اتجاه يومي D1: EMA20 فوق EMA50\n"
+    "• اختراق تجميع على فريم 4 ساعات H4\n"
+    "• RSI بين 35 و65 فقط — لا شراء قمم\n"
+    "• ثلاث طبقات تحقق يجب أن تجتمع كلها\n\n"
+    "الحجم والمخاطر 🛡️ (دستور SOP ثابت)\n"
+    "• حجم الصفقة 31.25% من المحفظة (125$ من 400$)\n"
+    "• وقف −6.4% | هدف +19.2% (مخاطرة 1 : عائد 3)\n"
+    "• أقصى 3 صفقات مفتوحة معاً\n"
+    "• خسارة يوم (−24$): توقف التداول 24 ساعة\n"
+    "• ربح شهري +120$ يقفل المراكمة للشهر\n\n"
     "المحفظة الورقية 💼\n"
     "• تتابع أرباحك تلقائياً\n"
     "• تعرض الصفقات المفتوحة والمغلقة\n"
     "• تحسب نسبة النجاح والأرباح\n\n"
-    "نتائجه من تجربة 5 سنوات طويلة\n"
-    "بكل صدق - لا يعد بالربح الدائم\n"
+    "بكل صدق — لا يعد بالربح الدائم\n"
     "التداول مخاطرة، والصبر أساسه\n"
     "البوت أداة مساعدة وليس نصيحة مالية"
 )
@@ -2633,15 +2639,22 @@ def latest_signals_text(u: dict) -> str:
             existing = [x for x in LATEST_OPEN_POSITIONS if x.get("ticker")==ticker_full and x.get("status")=="OPEN"]
             next_num = len(existing) + 1
             
+            _is_mhf = p.get("pool") == "MHF"
             txt += f"🎯 صفقة في عملة {ticker} #{next_num}\n"
             txt += "━━━━━━━━━━━━━━━━━━━━\n"
             txt += f"💰 دخول: {fmt_p(signal_price)}\n"
             txt += f"🚫 حد المطاردة: فوق {fmt_p(chase_price)} (+{chase_pct:.2f}%) ألغِ\n"
             txt += f"📦 حجم: {size_pct:.1f}% من رأس المال\n"
-            txt += f"⏳ المدة المتوقعة: 1-3 أيام\n"
-            txt += f"🎯 هدف 1: {fmt_p(tgt1)} (+{tgt1_pct:.2f}%)\n"
-            txt += f"🎯 هدف 2: {fmt_p(tgt2)} (+{tgt2_pct:.2f}%)\n"
-            txt += f"🔴 وقف: {fmt_p(sl)} ({sl_pct:.2f}%)\n"
+            if _is_mhf:
+                txt += "⏳ المدة: سوينغ 4H — حتى الهدف أو الوقف (لا سقف زمني)\n"
+                txt += f"🎯 الهدف: {fmt_p(tgt1)} (+{tgt1_pct:.2f}%) — خروج كامل\n"
+                txt += f"🔴 وقف: {fmt_p(sl)} ({sl_pct:.2f}%)\n"
+                txt += "📜 مصغّر التحوط: مخاطرة 1 مقابل عائد 3 (SOP)\n"
+            else:
+                txt += f"⏳ المدة المتوقعة: 1-3 أيام\n"
+                txt += f"🎯 هدف 1: {fmt_p(tgt1)} (+{tgt1_pct:.2f}%)\n"
+                txt += f"🎯 هدف 2: {fmt_p(tgt2)} (+{tgt2_pct:.2f}%)\n"
+                txt += f"🔴 وقف: {fmt_p(sl)} ({sl_pct:.2f}%)\n"
             txt += "━━━━━━━━━━━━━━━━━━━━\n\n"
     
     if not LATEST_PLANS and not LATEST_SELL_PLANS:
@@ -2714,15 +2727,17 @@ def weekly_report_text(u: dict, week_key: str = None, prices: dict = None) -> st
         
         wins = [d for d in closed_deals if float(d.get("profit_usd", 0)) > 0]
         losses = [d for d in closed_deals if float(d.get("profit_usd", 0)) < 0]
-        win_rate = (len(wins) / len(closed_deals) * 100.0) if closed_deals else 99.8
-        
+        win_rate = (len(wins) / len(closed_deals) * 100.0) if closed_deals else None
+        rate_line = (f"🎯 نسبة النجاح: {win_rate:.1f}%\n" if win_rate is not None
+                     else "🎯 نسبة النجاح: — (لا صفقات مغلقة بعد)\n")
+
         return (
             "📅 <b>التقرير الأسبوعي — الحافظة الورقية</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"💼 صفقات مفتوحة حالياً: {open_count}\n"
             f"📜 صفقات مغلقة منفذة: {len(closed_deals)}\n"
             f"✅ صفقات رابحة: {len(wins)} | ❌ خاسرة: {len(losses)}\n"
-            f"🎯 نسبة النجاح: {win_rate:.1f}%\n"
+            f"{rate_line}"
             f"💰 صافي الأرباح المحققة: {realized_pnl:+.2f} USDT\n"
         )
     except Exception as e:
@@ -2882,9 +2897,9 @@ def fmt_engine_status(res: dict) -> str:
 
 def backtest_summary(res: dict = None) -> str:
     try:
-        # حاول جلب نتائج الباكتست الحقيقية من BT5Y إذا موجودة
+        # حاول جلب نتائج الباكتست الحقيقية من BT5Y إذا موجودة (محرك قديم — يُعرض فقط عند تعطيل MHF)
         bt_text = None
-        if BT5Y and hasattr(BT5Y, 'STATE') and BT5Y.STATE.get('text'):
+        if BT5Y and not MHF_ENABLED and hasattr(BT5Y, 'STATE') and BT5Y.STATE.get('text'):
             bt_text = BT5Y.STATE.get('text')
             # نظف النص من HTML tags للعرض المبسط
             import re
@@ -2909,28 +2924,27 @@ def backtest_summary(res: dict = None) -> str:
         pass
     
     txt = (
-        "نتائج التجربة الطويلة 📊\n\n"
-        "تمت تجربة البوت على 2099 يوماً\n"
-        "من 2020-01-01 إلى 2025-09-30\n"
-        "في ظروف صعود وهبوط مختلفة\n"
-        "صمد في هبوط 2022 و2024\n\n"
-        "📈 الاستراتيجية V5 Ultra:\n"
-        "• فريم 5 دقائق للاتجاه\n"
-        "• فريم 1 دقيقة للدخول المجهري\n"
-        "• EMA 9/21/50 + RSI 45-75 + BO 15\n"
-        "• فلترة اتجاه BTC\n\n"
-        "💰 أداء التجربة الموثق (حساب 400$):\n"
-        "• العائد +1638% (النموذجي)\n"
-        "• 501 صفقة (≈صفقتين أسبوعياً)\n"
-        "• نسبة نجاح 53.5%\n"
-        "• أقصى تراجع 21.08% | Sharpe 2.45\n\n"
-        "🛡️ الحماية:\n"
-        "• وقف خسارة لكل صفقة (ديناميكي ATR)\n"
-        "• إغلاق طارئ عند انهيار\n"
-        "• بصمة ذكية تمنع التكرار\n\n"
-        "الأرقام لا تضمن المستقبل\n"
-        "لكنها تعطي فكرة صادقة عن الأداء\n"
-        "التداول يحتاج صبر وحكمة"
+        "استراتيجية مصغّر التحوط 📊\n\n"
+        "الدستور المالي SOP (ثوابت لا تُخالف):\n"
+        "• رأس المال 400$ — حجم الصفقة 125$\n"
+        "• وقف الخسارة −6.4% من الدخول (8$)\n"
+        "• الهدف +19.2% من الدخول (24$)\n"
+        "• مخاطرة 1 : عائد 3 لكل صفقة\n\n"
+        "قواعد الدخول (يجب اجتماعها كلها):\n"
+        "• زخم أسبوعي وسيولة كافية\n"
+        "• نشاط وعمق سوق صحي\n"
+        "• اتجاه D1 صاعد (EMA20 > EMA50)\n"
+        "• اختراق تجميع H4 مؤكد\n"
+        "• RSI بين 35 و65\n\n"
+        "قاطعات الحماية:\n"
+        "• أقصى 3 صفقات مفتوحة\n"
+        "• خسارة يوم (−24$): توقف 24 ساعة\n"
+        "• ربح شهري +120$ يقفل التداول للشهر\n\n"
+        "📘 بكل صدق: لا نعرض أرقام باكتست نظرية هنا.\n"
+        "الأداء الحقيقي يُبنى صفقة صفقة في المحفظة\n"
+        "الورقية، وزر تحميل السجل CSV يصدّر صفقاتها\n"
+        "الفعلية لا أرقاماً مصطنعة.\n"
+        "التداول مخاطرة والصبر أساسه."
     )
     return txt
 
@@ -2938,30 +2952,50 @@ def backtest_page_text(res: dict, page: int = 0) -> tuple:
     txt = backtest_summary(res)
     kb = [
         [bt("📄 تحميل سجل الصفقات (CSV)", "bt:csv")],
-        [bt("⚡ فريم 1 دقيقة (سكالبينغ)", "bt:page:1"), bt("📊 فريم 5 دقائق (دخول مجهري)", "bt:page:2")],
+        [bt("📥 قواعد الدخول (D1+H4)", "bt:page:1"), bt("🛡️ قواعد الخروج والحماية", "bt:page:2")],
         [bt("🏠 القائمة الرئيسية", "nav:more")]
     ]
     if page == 1:
         txt = (
-            "⚡ <b>محرك السكالبينغ (1 دقيقة) — الشرح الصادق</b>\n"
+            "📥 <b>قواعد دخول مصغّر التحوط — الشرح الصادق</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "• <b>الهدف:</b> اقتناص حركات سعرية سريعة أثناء الاتجاهات الصاعدة المؤكدة — أهداف ووقف ديناميكية وفق تقلب السوق.\n"
-            "• <b>البيانات:</b> بيانات كاش Binance Data Vision 1m الحقيقية دون بيانات مصطنعة.\n"
-            "• <b>فلترة الاتجاه:</b> صفقات السكالبينغ لا تُفتح إطلاقاً إلا إذا كانت شمعة 4H للعملة في مسار صاعد مؤكد.\n"
-            "• <b>إدارة المخاطر:</b> وقف خسارة محكم جداً وخروج سريع لتوليد تدفق نقدي يومي مستمر."
+            "• <b>الفلتر السردي:</b> زخم أسبوعي (8 شموع يومية) وسيولة كافية لاختيار مرشح واحد من القائمة البيضاء.\n"
+            "• <b>فحص السوق:</b> نشاط السعر وعمق دفتر الأوامر يجب أن يكونا صحيين قبل المتابعة.\n"
+            "• <b>الفني:</b> اتجاه D1 صاعد بشرط EMA20 فوق EMA50، واختراق نطاق تجميع على H4، وRSI بين 35 و65 فقط — لا يُشترى أي زخم منهك.\n"
+            "• <b>الحسم:</b> إن فشلت أي طبقة من الثلاث، لا صفقة إطلاقاً — التأكيد الثلاثي شرط إلزامي."
         )
     elif page == 2:
         txt = (
-            "📊 <b>محرك الدخول المجهري (5 دقائق) — الشرح الصادق</b>\n"
+            "🛡️ <b>قواعد خروج SOP وحماية رأس المال — الشرح الصادق</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "• <b>الهدف:</b> تحسين متوسط سعر الشراء وتفادي الدخول عند القمم اللحظية.\n"
-            "• <b>الآلية:</b> عند صدور إشارة شراء على 4H، يحدد المحرك منطقة دخول دقيقة بين دعم آخر ساعة وVWAP على فريم 5 دقائق للدخول بسعر أفضل (أمر حد).\n"
-            "• <b>الفائدة:</b> توفير نقاط دخول أفضل يغطي كامل رسوم بايننس والانزلاق السعري.\n"
-            "• <b>الأمان:</b> في حال انطلاق السعر بقوة دون تراجع، يضمن البوت عدم تفويت الموجة الكبرى."
+            "• <b>الخروج:</b> هدف مفرد +19.2% أو وقف −6.4% من سعر الدخول — لا خروج زمني أعمى.\n"
+            "• <b>الحجم:</b> كل صفقة ≈ 31.25% من المحفظة (125$ من رأس 400$) وبحد أقصى 3 صفقات معاً.\n"
+            "• <b>قاطع اليوم:</b> خسارة يوم −24$ توقف التداول 24 ساعة.\n"
+            "• <b>قفل الشهر:</b> ربح شهري +120$ يُغلق المراكمة حتى الشهر التالي.\n"
+            "• <b>فوق كل ذلك:</b> صمام الأمان ودرع الانهيار يُطبقان على كل صفقة جديدة أيضاً."
         )
     return txt, kb
 
 def backtest_csv_bytes(res: dict = None) -> bytes:
+    try:
+        # [MHF-INTEGRATION] تصدير سجل صفقات مصغّر التحوط الحقيقي (السجل الذي تحكمه قاطعات SOP)
+        if MHF_ENABLED and MHF_BRIDGE is not None:
+            import csv, io
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(["id", "symbol", "side", "entry_price", "stop_loss", "take_profit",
+                        "quantity", "position_size_usd", "status", "outcome",
+                        "exit_price", "pnl_usd", "opened_at", "closed_at"])
+            j = MHF_BRIDGE.journal.state
+            for t in list(j.get("active_trades", [])) + list(j.get("closed_trades", [])):
+                w.writerow([t.get("id"), t.get("symbol"), t.get("side", "SPOT_LONG"),
+                            t.get("entry_price"), t.get("stop_loss"), t.get("take_profit"),
+                            t.get("quantity"), t.get("position_size_usd"), t.get("status"),
+                            t.get("outcome", ""), t.get("exit_price", ""), t.get("pnl_usd", ""),
+                            t.get("opened_at"), t.get("closed_at", "")])
+            return buf.getvalue().encode("utf-8")
+    except Exception as e:
+        log(f"[MHF CSV ERROR] {e}")
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         pkl_path = os.path.join(base_dir, 'bt5y_static_result.pkl')
@@ -3113,16 +3147,22 @@ def get_live_page_content() -> tuple:
         txt += "✅ <b>الحالة: مكتمل — البوت يعمل ويحرس السوق</b>\n"
     txt += "━━━━━━━━━━━━━━━━━━━━\n"
     
-    # تفاصيل فريم 5 دقائق (الرئيسي)
-    txt += "📦 <b>فريم 5 دقائق (فريم الاستراتيجية الرئيسي):</b>\n"
-    txt += f"• العملات النشطة: <code>{status['symbols_5m']}/{status['total_assets']}</code> عملة\n"
-    txt += f"• الكاش: {'✅ موجود وجاهز' if status['has_cache_5m'] else '⏳ جاري الحفظ'}\n"
-    txt += "\n"
-    
-    # تفاصيل فريم 1 دقيقة
-    txt += "📦 <b>فريم 1 دقيقة:</b>\n"
-    txt += f"• العملات: <code>{status['symbols_1m']}/{status['total_assets']}</code> عملة\n"
-    txt += f"• الكاش: {'✅ موجود وجاهز' if status['has_cache_1m'] else '⏳ جاري الحفظ'}\n"
+    # تفاصيل بيانات المراقبة (الكاش يغذي الدرع والمراقبة اللحظية)
+    if MHF_ENABLED and MHF_BRIDGE is not None:
+        txt += "📦 <b>بيانات المراقبة والدرع (1m/5m):</b>\n"
+        txt += f"• 5 دقائق: <code>{status['symbols_5m']}/{status['total_assets']}</code> عملة — كاش: {'✅' if status['has_cache_5m'] else '⏳ جاري الحفظ'}\n"
+        txt += f"• دقيقة: <code>{status['symbols_1m']}/{status['total_assets']}</code> عملة — كاش: {'✅' if status['has_cache_1m'] else '⏳ جاري الحفظ'}\n"
+        txt += "💡 الاستراتيجية نفسها تجلب شموع D1/H4 مباشرة عند كل مسح\n"
+    else:
+        # تفاصيل فريم 5 دقائق (الرئيسي)
+        txt += "📦 <b>فريم 5 دقائق (فريم الاستراتيجية الرئيسي):</b>\n"
+        txt += f"• العملات النشطة: <code>{status['symbols_5m']}/{status['total_assets']}</code> عملة\n"
+        txt += f"• الكاش: {'✅ موجود وجاهز' if status['has_cache_5m'] else '⏳ جاري الحفظ'}\n"
+        txt += "\n"
+        # تفاصيل فريم 1 دقيقة
+        txt += "📦 <b>فريم 1 دقيقة:</b>\n"
+        txt += f"• العملات: <code>{status['symbols_1m']}/{status['total_assets']}</code> عملة\n"
+        txt += f"• الكاش: {'✅ موجود وجاهز' if status['has_cache_1m'] else '⏳ جاري الحفظ'}\n"
     txt += "━━━━━━━━━━━━━━━━━━━━\n"
     
     # حالة المحرك
@@ -3131,8 +3171,12 @@ def get_live_page_content() -> tuple:
     if ENGINE_RES:
         gate = ENGINE_RES.get('gate', {})
         txt += "🤖 <b>المحرك الذكي:</b>\n"
-        txt += "• الاستراتيجية: V5 Ultra (3 معاملات)\n"
-        txt += f"• فحص العملات: <code>{gate.get('checked', status['symbols_5m'])}</code> عملة ⚡\n"
+        if MHF_ENABLED and MHF_BRIDGE is not None:
+            txt += f"• الاستراتيجية: مصغّر التحوط SOP — تأكيد ثلاثي D1/H4\n"
+            txt += f"• مسح الدخول: <code>{MHF_WHITELIST_N or 90}</code> زوجاً كل <code>{int(float(os.environ.get('TITAN_MHF_SCAN_MINUTES','60')))}</code> دقيقة ⚡\n"
+        else:
+            txt += "• الاستراتيجية: V5 Ultra (3 معاملات)\n"
+            txt += f"• فحص العملات: <code>{gate.get('checked', status['symbols_5m'])}</code> عملة ⚡\n"
         txt += f"• صفقات مفتوحة حالياً: <code>{open_count}</code> صفقة\n"
         txt += f"• زمن الفحص: <code>{status['last_cycle_secs']:.1f}</code> ثانية\n"
         if status["last_cycle"]:
@@ -3141,7 +3185,8 @@ def get_live_page_content() -> tuple:
         txt += "🤖 <b>المحرك:</b> ⏳ قيد الفحص الأولي (ثوانٍ قليلة)\n"
         
     txt += "━━━━━━━━━━━━━━━━━━━━\n"
-    txt += "🟢 <b>أرقام النظام محدثة لحظياً وتلقائياً</b>"
+    txt += "🟢 <b>أرقام النظام محدثة لحظياً وتلقائياً</b>\n"
+    txt += f"🔖 <code>{BUILD_TAG}</code>"
     kb = back_kb([[bt("💼 المحفظة الورقية", "m:port")]])
     return txt, kb
 
@@ -3199,30 +3244,38 @@ def get_guard_content(u: dict, chat_id: int) -> tuple:
                 pnl_icon = "🟢" if pnl_pct >= 0 else "🔴"
                 
                 # حساب المدة المتوقعة
+                _is_mhf_pos = pos.get("pool") == "MHF"
                 try:
                     from datetime import timezone as _tz
                     entry_dt = datetime.fromisoformat(str(pos.get("entry_time","")).replace("Z","+00:00"))
                     elapsed_h = (datetime.now(_tz.utc) - entry_dt).total_seconds()/3600
-                    if elapsed_h < 24:
+                    if _is_mhf_pos:
+                        exp_text = (f"سوينغ حتى الهدف/الوقف (مضى {elapsed_h:.1f}س)" if elapsed_h < 24
+                                    else f"سوينغ حتى الهدف/الوقف (مضى {elapsed_h/24:.1f} يوم)")
+                    elif elapsed_h < 24:
                         exp_text = f"المتوقع 1-3 أيام (مضى {elapsed_h:.1f}س)"
                     elif elapsed_h < 72:
                         exp_text = f"المتوقع 1-3 أيام (مضى {elapsed_h/24:.1f} يوم)"
                     else:
                         exp_text = f"تجاوزت 3 أيام (مضى {elapsed_h/24:.1f} يوم)"
                 except:
-                    exp_text = "المتوقع 1-3 أيام"
-                
-                txt += f"┌ 📌 <b>صفقة #{num}</b> ({rem_pct}% متبقي | {pos.get('frame','5m')})\n"
+                    exp_text = "سوينغ حتى الهدف/الوقف" if _is_mhf_pos else "المتوقع 1-3 أيام"
+
+                _pool_lbl = POOL_NAMES.get(pos.get("pool", ""), pos.get("pool", ""))
+                txt += f"┌ 📌 <b>صفقة #{num}</b> ({rem_pct}% متبقي | {_pool_lbl} {pos.get('frame','5m')})\n"
                 txt += f"├ 📥 الشراء: {fmt_p(buy_p)} USDT | التكلفة: {cost:.1f} USDT\n"
                 txt += f"├ 🏷️ الحالي: {fmt_p(curr_p)} USDT\n"
                 txt += f"├ {pnl_icon} <b>الربح الحالي: {pnl_pct:+.2f}% ({pnl_usd:+.2f} USDT)</b>\n"
-                txt += f"├ 🎯 هدف 1: {fmt_p(tgt1)} | 🎯 هدف 2: {fmt_p(tgt2)}\n"
+                if _is_mhf_pos:
+                    txt += f"├ 🎯 الهدف: {fmt_p(tgt1)} (+19.2% SOP)\n"
+                else:
+                    txt += f"├ 🎯 هدف 1: {fmt_p(tgt1)} | 🎯 هدف 2: {fmt_p(tgt2)}\n"
                 txt += f"├ 🔴 الوقف: {fmt_p(sl)}\n"
                 txt += f"├ ⏳ المدة المتوقعة: {exp_text}\n"
                 if time_str:
                     txt += f"└ ⏱️ {time_str} UTC\n\n"
                 else:
-                    txt += "└ ⏱️ V5 Ultra 5m\n\n"
+                    txt += f"└ ⏱️ {POOL_NAMES.get(pos.get('pool'), pos.get('pool',''))} {pos.get('frame','')}\n\n"
     
     if not has_any:
         st_data = load_state()
@@ -3686,7 +3739,7 @@ def handle_update(upd: dict):
                 handle_text_message(msg)
                 return
             send_msg(cid, (
-                "🔒 <b>مرحباً بك في بوت التداول الذكي V5 Ultra</b>\n"
+                "🔒 <b>مرحباً بك في بوت التداول الذكي — مصغّر التحوط</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━\n"
                 f"👤 معرف حسابك (ID): <code>{cid}</code>\n\n"
                 "هذا البوت خاص وآمن. للبدء وتفعيل حسابك لتلقي الإشارات ومتابعة الصفقات، اضغط على زر <b>📨 طلب وصول</b> أدناه وسيتم إرسال طلبك للمشرف للموافقة الفورية.\n"
@@ -3743,7 +3796,7 @@ def boot_welcome_admin():
         return
     st["boot_welcome_last_at"] = now_t
     save_state()
-    send_msg(aid, f"✅ البوت يعمل\n{STRATEGY_PROVENANCE}", more_kb())
+    send_msg(aid, f"✅ البوت يعمل\n{STRATEGY_PROVENANCE}\n🔖 {BUILD_TAG}", more_kb())
 
 UPDATE_EXECUTOR = ThreadPoolExecutor(max_workers=20, thread_name_prefix="tg_fast")
 

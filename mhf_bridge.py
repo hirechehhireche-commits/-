@@ -171,6 +171,17 @@ class MHFBridge:
                 synced.add(pid)  # الصفقة مغلقة أصلاً في السجل — لا شيء لعمله
                 n += 1
                 continue
+            # [SOP-FIDELITY] عكس الكمية/الكلفة الفعليتين للمحفظة الورقية (التراكم)
+            # حتى تعمل قاطعات السجل (−$24 يوم / +$120 شهر) على أرقام PnL حقيقية لا النموذجية
+            try:
+                _q = float(pos.get("qty") or 0.0)
+                _c = float(pos.get("cost_usd") or 0.0)
+                if _q > 0:
+                    trade["quantity"] = _q
+                if _c > 0:
+                    trade["position_size_usd"] = _c
+            except Exception:
+                pass
             ctype = str(pos.get("close_type", "")).upper()
             outcome = "TAKE_PROFIT" if ctype in ("T1", "T2", "TP") else ("STOP_LOSS" if ctype == "SL" else "MANUAL")
             exit_price = float(pos.get("close_price") or pos.get("current_price") or 0.0)
