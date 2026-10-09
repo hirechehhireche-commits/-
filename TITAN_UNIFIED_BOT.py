@@ -3199,7 +3199,8 @@ def get_live_page_content() -> tuple:
         txt += "🤖 <b>المحرك الذكي:</b>\n"
         if MHF_ENABLED and MHF_BRIDGE is not None:
             txt += f"• الاستراتيجية: مصغّر التحوط SOP — تأكيد ثلاثي D1/H4\n"
-            txt += f"• مسح الدخول: <code>{MHF_WHITELIST_N or 90}</code> زوجاً كل <code>{int(float(os.environ.get('TITAN_MHF_SCAN_MINUTES','60')))}</code> دقيقة ⚡\n"
+            txt += f"• مسح الدخول: <code>{MHF_WHITELIST_N or 90}</code> زوجاً كل <code>{int(float(os.environ.get('TITAN_MHF_SCAN_MINUTES','5')))}</code> دقيقة ⚡\n"
+            txt += "• بيانات القرار: شموع D1/H4 مكوَّنة من شموع 5 دقائق حية (الذيل متجدد كل مسح — فرص كل 5 دقائق بدل انتظار الإغلاق الكامل)\n"
         else:
             txt += "• الاستراتيجية: V5 Ultra (3 معاملات)\n"
             txt += f"• فحص العملات: <code>{gate.get('checked', status['symbols_5m'])}</code> عملة ⚡\n"

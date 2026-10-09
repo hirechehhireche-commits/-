@@ -188,6 +188,12 @@ def _apply_sop_profile() -> str:
 SOP_PROFILE: str = _apply_sop_profile()
 
 
+# [MHF-V3.4-5M-AGGREGATION] خريطة الإطارات الزمنية ⟵ مللي ثانية — لتكوين D1/H4 من شموع 5 دقائق
+TF_FRAME_MS: Dict[str, int] = {
+    "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000,
+}
+
+
 WHITELIST: Tuple[str, ...] = (
     "XRPUSDT", "SOLUSDT", "TRXUSDT", "ZECUSDT", "DOGEUSDT", "LINKUSDT", "ADAUSDT", "XLMUSDT",
     "BCHUSDT", "NEARUSDT", "LTCUSDT", "AVAXUSDT", "HBARUSDT", "SUIUSDT", "TAOUSDT", "DOTUSDT",
@@ -258,6 +264,56 @@ class Candle:
             quote_volume=float(row[7]),
             trades=int(row[8]) if len(row) > 8 else 0,
         )
+
+
+# ---------------------------------------------------------------- [MHF-V3.4-5M-AGGREGATION]
+# تكوين شموع الإطارات الكبرى من شموع أصغر (5 دقائق) — بلا lookahead، حتمية، ونفس
+# اصطلاح Binance في الحقول (open=أول/close=آخر/high=أعلى/low=أدنى/volume=مجموع،
+# open_time=فتح الإطار، close_time=فتح+المدة−1ms). شمعة إطار لم تكتمل خاماتها
+# تظل «متشكلة» بقيمة آخر سعر — مثل الشمعة المباشرة القادمة من بايننس تماماً.
+def resample_candles(bars: Sequence[Candle], frame_ms: int) -> List[Candle]:
+    """جمّع شموعاً متتابعة إلى إطار أكبر. لا تعديل للمدخلات، لا حالات خاصة للتوقيت."""
+    if not bars or frame_ms <= 0:
+        return []
+    out: List[Candle] = []
+    bucket: List[Candle] = []
+    bucket_open: Optional[int] = None
+
+    def flush() -> None:
+        if not bucket or bucket_open is None:
+            return
+        out.append(Candle(
+            open_time=bucket_open,
+            open=bucket[0].open,
+            high=max(c.high for c in bucket),
+            low=min(c.low for c in bucket),
+            close=bucket[-1].close,
+            volume=sum(c.volume for c in bucket),
+            close_time=bucket_open + frame_ms - 1,
+            quote_volume=sum(c.quote_volume for c in bucket),
+            trades=sum(c.trades for c in bucket),
+        ))
+
+    for c in bars:
+        frame_open = (c.open_time // frame_ms) * frame_ms
+        if bucket_open is None:
+            bucket_open = frame_open
+        if frame_open != bucket_open:
+            flush()
+            bucket = []
+            bucket_open = frame_open
+        bucket.append(c)
+    flush()
+    return out
+
+
+def merge_live_tail(native: Sequence[Candle], tail: Sequence[Candle]) -> List[Candle]:
+    """الجذر (الأصل) محفوظ حتى فتح أول إطار بالذيل المكوَّن من 5د، وما بعده يُستبدل به."""
+    if not tail:
+        return list(native)
+    first_tail_open = tail[0].open_time
+    prefix = [c for c in native if c.open_time < first_tail_open]
+    return prefix + list(tail)
 
 
 # ==============================================================================
@@ -514,6 +570,29 @@ class BinanceClient:
     def klines(self, symbol: str, interval: str, limit: int = SOP.KLINE_LIMIT) -> List[Candle]:
         raw = self._get("/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
         return [Candle.from_binance(row) for row in raw]
+
+    # [MHF-V3.4-5M-AGGREGATION] بيانات قرار حية: الجذْم المغلق الأصلي + ذيل D1/H4 مكوَّن من
+    # شموع 5 دقائق (آخر 25 ساعة) — يُبنى الشكل الحي كل مسح، فيقتنص الفرص كل 5 دقائق فعلياً.
+    # فشل الجلب الجزئي ⟵ رجوع للجلب المباشر حرفياً (لا يفتح ولا يغلق أي بوابة).
+    def klines_live(self, symbol: str, interval: str, limit: int = SOP.KLINE_LIMIT,
+                    tail_5m: int = 300) -> List[Candle]:
+        native = self.klines(symbol, interval, limit)
+        frame_ms = TF_FRAME_MS.get(str(interval))
+        if not native or frame_ms is None or frame_ms < TF_FRAME_MS["5m"]:
+            return native
+        try:
+            tail5m = self.klines(symbol, "5m", tail_5m)
+        except BinanceError as e:
+            log("WARN", f"5m live-tail fetch failed for {symbol} (fallback to native): {e}")
+            return native
+        if not tail5m:
+            log("WARN", f"5m live-tail empty for {symbol} (fallback to native)")
+            return native
+        merged = merge_live_tail(native, resample_candles(tail5m, frame_ms))
+        if merged and merged[-1].close_time >= native[-1].open_time:
+            log("DEBUG", f"[5M-AGG] {symbol} {interval}: tail {len(resample_candles(tail5m, frame_ms))} bar(s) recomposed "
+                        f"(last close {merged[-1].close})")
+        return merged
 
     def ticker_24h(self, symbol: str) -> Dict[str, float]:
         d = self._get("/api/v3/ticker/24hr", {"symbol": symbol})
@@ -1513,8 +1592,9 @@ class TechnicalAgent:
         self.llm = llm
 
     def analyze(self, symbol: str) -> Dict[str, Any]:
-        d1 = Indicators.analyze_timeframe(self.client.klines(symbol, SOP.TF_D1, SOP.KLINE_LIMIT))
-        h4 = Indicators.analyze_timeframe(self.client.klines(symbol, SOP.TF_H4, SOP.KLINE_LIMIT))
+        # [MHF-V3.4-5M-AGGREGATION] قرار الدخول يتغذى من D1/H4 مكوَّنة من 5د (ذيل حي متجدد)
+        d1 = Indicators.analyze_timeframe(self.client.klines_live(symbol, SOP.TF_D1, SOP.KLINE_LIMIT))
+        h4 = Indicators.analyze_timeframe(self.client.klines_live(symbol, SOP.TF_H4, SOP.KLINE_LIMIT))
         return {"symbol": symbol, "d1": d1, "h4": h4}
 
     @staticmethod
@@ -1750,7 +1830,8 @@ class StrategyPipeline:
         # [MHF-V3-UPGRADE] بوابة نظام السوق — لا مسح وBTC تحت EMA20/EMA50 يومي (جلب واحد، غير حاجب عند التعذر)
         if getattr(SOP, "BTC_REGIME_GATE", False) or getattr(SOP, "CRASH_SENTINEL", False):
             try:
-                btc_d1 = self.client.klines("BTCUSDT", SOP.TF_D1, SOP.DAILY_LOOKBACK)
+                # [MHF-V3.4-5M-AGGREGATION] بوابة BTC أيضاً تتغذى من 5د (ذيل حي كل مسح)
+                btc_d1 = self.client.klines_live("BTCUSDT", SOP.TF_D1, SOP.DAILY_LOOKBACK)
                 if getattr(SOP, "BTC_REGIME_GATE", False):
                     btc_trend = Backtester._daily_trend_map(btc_d1)
                     if btc_trend and not btc_trend[-1][1]:

@@ -4,7 +4,8 @@ mhf_bridge.py — [MHF-INTEGRATION] جسر Micro Hedge Fund ⟵⟶ TITAN
 
 المسؤولية الوحيدة للجسر:
   1) تشغيل خط أنابيب micro_hedge_fund (StrategyPipeline) بإيقاع زمني مقيّد
-     (افتراضي: مسح كل TITAN_MHF_SCAN_MINUTES دقيقة) بدون LLM خارجي افتراضياً.
+     (افتراضي: مسح كل TITAN_MHF_SCAN_MINUTES=5 دقيقة — ذيل D1/H4 مكوَّن من شموع 5د
+     عبر klines_live فيقتنص الفرص كل 5 دقائق بدل انتظار الإغلاق الكامل) بدون LLM خارجي افتراضياً.
   2) تحويل الإشارة المعتمدة إلى مخطط خطط TITAN الورقي/الحقيقي مع ثوابت SOP
      ($125 حجم مركز من رأس مال $400؛ مستويات SL/TP تُقرأ من ملف SOP الفعّال — v3.3: SL −4.8%/6$ + خروج مدرّج +3.2%/+22.4%).
   3) قيد الصفقة في سجل المحرك (Journal) عند القبول، ومزامنة إغلاقات الحافظة
@@ -26,7 +27,7 @@ MHF_FRAME = "4h"
 # نسبة المخاطرة من إجمالي السيولة الورقية = حجم المركز / رأس المال (SOP)
 MHF_SIZE_PCT = round(MHF.SOP.POSITION_SIZE_USD / MHF.SOP.ACCOUNT_CAPITAL_USD * 100.0, 4)  # 31.25
 
-DEFAULT_SCAN_INTERVAL_S = float(os.environ.get("TITAN_MHF_SCAN_MINUTES", "60")) * 60.0
+DEFAULT_SCAN_INTERVAL_S = float(os.environ.get("TITAN_MHF_SCAN_MINUTES", "5")) * 60.0  # [MHF-V3.4] فرص كل 5 دقائق
 _TZ = timezone.utc
 
 
