@@ -120,6 +120,74 @@ class SOP:
         return (cls.TARGET_PROFIT_PER_TRADE_USD / cls.POSITION_SIZE_USD) * 100.0
 
 
+# =============================================================================
+# SOP PROFILE v3 — [MHF-V3-UPGRADE] خروج مدرّج 1R/2R + قواعد جودة أشد + قفل 40%
+# MHF_SOP_PROFILE=v2 يرجّع الدستور الأصلي حرفياً (رجوع فوري، لا مساس بسطر واحد من v2)
+# =============================================================================
+
+def _apply_sop_profile() -> str:
+    profile = os.getenv("MHF_SOP_PROFILE", "v3").strip().lower()
+    if profile == "v3":
+        # الخروج المدرّج — القيم مختارَة عبر باكتست M0 فعلي على 90 زوجاً/167يوماً:
+        # نصف الكمية عند +0.5R (تأمين مبكر) والوقف للتعادل، والمتبقي نحو +3.5R
+        SOP.STAGED_EXITS = True
+        SOP.STAGE1_TP_PCT = 3.2          # +0.5R على نصف الكمية  [M0-ITER]
+        SOP.STAGE2_TP_PCT = 22.4         # +3.5R على المتبقي     [M0-ITER] (الهضبة 22.4–25.6)
+        SOP.TIME_STOP_DAYS = 3           # خروج زمني مبكر — أفضل محفز مقيس [M0-ITER]
+        # قفل الشهر: الهدف الموجّه للمستخدم +40% على رأس 400$ (مؤشر أداء وليس وعداً)
+        SOP.MONTHLY_TARGET_USD = 160.0
+        # قواعد جودة أشد (مستنتجة من الفشل المقيس 23.3% نجاح في v2)
+        SOP.MIN_24H_QUOTE_VOLUME_USD = 75_000_000.0
+        SOP.VOLUME_SURGE_RATIO = 1.8
+        SOP.MAX_CONSOLIDATION_RANGE_PCT = 8.0
+        SOP.BREAKOUT_MIN_VOLUME_RATIO = 1.5
+        SOP.RSI_MIN, SOP.RSI_MAX = 40.0, 60.0
+        # عائلة الإعداد الثانية: تراجع صحي مع الاتجاه — نطاق 35-45 وعمق 3-15% [M0-ITER]
+        SOP.PULLBACK_RSI_LOW, SOP.PULLBACK_RSI_HIGH = 35.0, 45.0
+        SOP.PULLBACK_MIN_DEPTH_PCT, SOP.PULLBACK_MAX_DEPTH_PCT = 3.0, 15.0
+        # بوابة نظام السوق: لا دخول وBTC يومياً هابط
+        SOP.BTC_REGIME_GATE = True
+        # [MHF-V3.1-CRASH-SENTINEL] محرك التنبؤ بالانهيارات — عتبة مشتقة قياسياً من تجميع الخسائر
+        SOP.CRASH_SENTINEL = True
+        SOP.CRASH_BTC_RET3_THRESHOLD = -3.5   # قمّة مقيسة على هضبة −2.5..−3.5 (+$371..445) — تهيمن −3.0 بكل المحاور
+        # [M11-STOPWIDTH-MEASURED] وقف أضيق مقيس بثلاثة محركات مستقلة: offline +$368.61 (+47)،
+        # طيات OOS أقوى بلا انقلاب (−$185.1/+102.7/+460.8)، ومحفظة حقيقية +$74.51 مقابل +$47.98 (+55%).
+        # عدم الرتابة عند 7$ موثقة (+$312) — نطاق ضجيج موجود ⟵ اعتماد البطل المقيس بلا مبالغة
+        SOP.MAX_RISK_PER_TRADE_USD = 6.0
+        # [MHF-V3.2-FIVE-ENGINES] محركات إلغاء التحفظات الخمسة — افتراضيات «متوسطة متحفظة محايدة» حيث لا قياس
+        SOP.SIM_FEES = True
+        SOP.SIM_FEE_PCT = 0.1            # عمولة لكل طرف (افتراضي متحفظ صريح)
+        SOP.SIM_SLIPPAGE_PCT = 0.05      # انزلاق لكل طرف (افتراضي متحفظ صريح)
+        SOP.MOONSHOT_SENTINEL = True
+        SOP.MOONSHOT_BTC_RET3_THRESHOLD = 3.0   # مرآة عتبة الانهيار: نظام الانفجار الجامع للرابحين
+        SOP.MOONSHOT_TSTOP_MULT = 2.0           # مضاعف التمديد (افتراض وسط — مصدره أفضل نقطة في المسح لكل-صفقة)
+        # [M5-EXTENSION-MEASURED] آلية تمديد الإيقاف خارج العواصف — تربح +$77 محاسبةً لكل-صفقة لكنها
+        # تخسر $14 في محاكاة العاصمة الحقيقية (الآجال الأطول تسد المقاعد: +$33.63 مقابل +$47.98) ⟵
+        # آلية جاهزة ومقيسة وموثقة ومرفوضة بالقياس — افتراضياً مطفأة (الحكم النهائي قيد رأس المال)
+        SOP.TIME_STOP_EXT_ENABLE = False
+        SOP.TIME_STOP_EXT_RET3_MIN = -3.0
+    else:
+        # إعادة الدستور v2 كاملاً — كل ثابت لمسه v3 يعود لقيمته الأصلية حرفياً
+        SOP.STAGED_EXITS = False
+        SOP.TIME_STOP_DAYS = 0
+        SOP.BTC_REGIME_GATE = False
+        SOP.CRASH_SENTINEL = False
+        SOP.SIM_FEES = False
+        SOP.MOONSHOT_SENTINEL = False
+        SOP.TIME_STOP_EXT_ENABLE = False
+        SOP.MAX_RISK_PER_TRADE_USD = 8.0          # نسخة r/SOP_v2: رجوع حرفي للخطر الأصلي 2% من رأس المال
+        SOP.MONTHLY_TARGET_USD = 120.0
+        SOP.MIN_24H_QUOTE_VOLUME_USD = 50_000_000.0
+        SOP.VOLUME_SURGE_RATIO = 1.5
+        SOP.MAX_CONSOLIDATION_RANGE_PCT = 12.0
+        SOP.BREAKOUT_MIN_VOLUME_RATIO = 1.2
+        SOP.RSI_MIN, SOP.RSI_MAX = 35.0, 65.0
+    return profile
+
+
+SOP_PROFILE: str = _apply_sop_profile()
+
+
 WHITELIST: Tuple[str, ...] = (
     "XRPUSDT", "SOLUSDT", "TRXUSDT", "ZECUSDT", "DOGEUSDT", "LINKUSDT", "ADAUSDT", "XLMUSDT",
     "BCHUSDT", "NEARUSDT", "LTCUSDT", "AVAXUSDT", "HBARUSDT", "SUIUSDT", "TAOUSDT", "DOTUSDT",
@@ -333,6 +401,40 @@ class Indicators:
             "reason": reason,
         }
 
+    # ---------------------------------------------------------- PULLBACK ----
+    @staticmethod
+    def pullback_dip(candles: Sequence[Candle]) -> Dict[str, Any]:
+        """عائلة الإعداد الثانية (v3): هبوط RSI المؤقت داخل اتجاه صاعد ثم ارتداد.
+
+        شرط الاتجاه D1 مسؤولية بوابة TechnicalAgent؛ هنا نقيس فقط:
+        RSI(14) داخل نطاق التراجع [PULLBACK_RSI_LOW, PULLBACK_RSI_HIGH]
+        + آخر شمعة مغلقة أعلى من قمة سابقتها (تأكد انعطاف صاعد).
+        """
+        if not getattr(SOP, "STAGED_EXITS", False) or len(candles) < SOP.RSI_PERIOD + SOP.BREAKOUT_LOOKBACK + 3:
+            return {"pullback": False, "reason": "pullback setup disabled / insufficient candles"}
+        closes = [c.close for c in candles]
+        rsi14 = Indicators.rsi(closes, SOP.RSI_PERIOD)
+        last, prev = candles[-1], candles[-2]
+        dipped = rsi14 is not None and SOP.PULLBACK_RSI_LOW <= rsi14 <= SOP.PULLBACK_RSI_HIGH
+        turned_up = last.close > prev.high
+        # [M0-ITER1] تراجع حقيقي وليس ضجيجاً: الإغلاق بين 3% و15% تحت قمة آخر 20 شمعة
+        prior_high = max(c.high for c in candles[-SOP.BREAKOUT_LOOKBACK - 1:-1])
+        depth_pct = (prior_high - last.close) / prior_high * 100.0 if prior_high > 0 else 0.0
+        real_dip = SOP.PULLBACK_MIN_DEPTH_PCT <= depth_pct <= SOP.PULLBACK_MAX_DEPTH_PCT
+        ok = dipped and turned_up and real_dip
+        if ok:
+            reason = (f"RSI {rsi14:.1f} in pullback zone, depth {depth_pct:.1f}% off 20-bar high, "
+                      f"bounced above prior high")
+        elif not dipped:
+            reason = f"RSI {rsi14:.1f} outside pullback zone" if rsi14 is not None else "no RSI"
+        elif not real_dip:
+            reason = f"no real dip: {depth_pct:.1f}% off 20-bar high (need {SOP.PULLBACK_MIN_DEPTH_PCT}-{SOP.PULLBACK_MAX_DEPTH_PCT}%)"
+        else:
+            reason = "dip without bounce confirmation"
+        return {"pullback": bool(ok),
+                "rsi14": round(rsi14, 2) if rsi14 is not None else None,
+                "reason": reason}
+
     # ------------------------------------------------------------ SNAPSHOT ----
     @staticmethod
     def analyze_timeframe(candles: Sequence[Candle]) -> Dict[str, Any]:
@@ -354,6 +456,7 @@ class Indicators:
             "price_above_ema20": bool(last_close is not None and ema20 is not None and last_close > ema20),
             "rsi_in_range": bool(rsi14 is not None and SOP.RSI_MIN < rsi14 < SOP.RSI_MAX),
             "breakout": Indicators.consolidation_breakout(candles),
+            "pullback_dip": Indicators.pullback_dip(candles),
         }
 
 
@@ -496,45 +599,55 @@ class KeylessLLM:
     Every agent works perfectly without it — it only refines rankings.
     """
 
+    # سلّم نماذج احتياطي — «openai» يجيب 402 أحياناً على المستوى المجاني ([MHF-V3-UPGRADE])
+    MODEL_LADDER: Tuple[str, ...] = ("openai", "openai-fast", "mistral")
+
     def __init__(self, enabled: bool = True, timeout: int = 45, referrer: str = "micro-hedge-fund-strategy"):
         self.enabled = enabled
         self.timeout = timeout
         self.referrer = referrer
         self.available: Optional[bool] = None
+        self.model_used: Optional[str] = None
+        self._dead: set = set()
         self._ctx = ssl.create_default_context()
 
     def ask_json(self, system: str, user: str, retries: int = 2) -> Optional[dict]:
         if not self.enabled:
             return None
 
-        payload = json.dumps({
-            "model": "openai",
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "temperature": 0.2,
-            "referrer": self.referrer,
-        }).encode("utf-8")
+        for model in self.MODEL_LADDER:
+            if model in self._dead:
+                continue
+            payload = json.dumps({
+                "model": model,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                "temperature": 0.2,
+                "referrer": self.referrer,
+            }).encode("utf-8")
 
-        for attempt in range(1, retries + 1):
-            try:
-                req = urllib.request.Request(
-                    POLLINATIONS_URL,
-                    data=payload,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Referer": self.referrer,
-                        "User-Agent": "micro-hedge-fund-strategy/1.0",
-                    },
-                )
-                with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as resp:
-                    body = json.loads(resp.read().decode("utf-8"))
-                content = (body.get("choices") or [{}])[0].get("message", {}).get("content")
-                parsed = self.extract_json(content or "")
-                if parsed:
-                    self.available = True
-                    return parsed
-            except Exception as exc:
-                log("DEBUG", f"LLM attempt {attempt} failed: {str(exc)[:120]}")
-            time.sleep(3.5)  # anonymous tier allows ~1 request / 3s
+            for attempt in range(1, retries + 1):
+                try:
+                    req = urllib.request.Request(
+                        POLLINATIONS_URL,
+                        data=payload,
+                        headers={
+                            "Content-Type": "application/json",
+                            "Referer": self.referrer,
+                            "User-Agent": "micro-hedge-fund-strategy/1.0",
+                        },
+                    )
+                    with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as resp:
+                        body = json.loads(resp.read().decode("utf-8"))
+                    content = (body.get("choices") or [{}])[0].get("message", {}).get("content")
+                    parsed = self.extract_json(content or "")
+                    if parsed:
+                        self.available = True
+                        self.model_used = model
+                        return parsed
+                except Exception as exc:
+                    log("DEBUG", f"LLM {model} attempt {attempt} failed: {str(exc)[:120]}")
+                time.sleep(3.5)  # anonymous tier allows ~1 request / 3s
+            self._dead.add(model)  # هذا النموذج غير متاح الآن — جرّب التالي على السلّم
 
         self.available = False
         return None
@@ -599,6 +712,70 @@ You are the NARRATIVE ANALYST of a disciplined micro hedge fund ($400 AUM) tradi
 # OUTPUT CONTRACT
 Raw JSON only, no markdown, no prose:
 {"marketRegime":"risk-on|neutral|risk-off","summary":"...","selected":[{"symbol":"SOLUSDT","narrative":"Layer-1","thesis":"...","strength":8}]}"""
+
+
+# [MHF-V3-UPGRADE] برومبت احترافي v3 — تخصيص سردي بمستوى مدير صندوق مع ضوابط تكتل ونظام سوقي
+PROMPT_NARRATIVE_V3 = """# ROLE
+You are the CHIEF NARRATIVE ALLOCATOR of a disciplined crypto micro hedge fund ($400 AUM), SPOT LONG-ONLY on Binance. Your picks feed a mechanical D1-trend + H4-setup pipeline; your job is ONLY to rank liquidity-backed weekly momentum into a short, diversified watchlist.
+
+# HARD RULES (violating any makes the answer unusable)
+1. Select ONLY symbols present verbatim in the "candidates" array. Never invent, translate or rename a symbol.
+2. Reject parabolic exhaustion (weekly > +40%) and falling knives (weekly < -15%), even if listed.
+3. Return AT MOST 5 symbols; fewer is better than padding.
+4. SECTOR CAP: at most 2 symbols from the same sector (Layer-1, Layer-2, DeFi, Meme, Gaming/Metaverse, AI, Storage, Payments, Oracle, Privacy, Exchange-token, RWA).
+5. "strength" is an integer 1-10 = sector heat (0-4) + narrative freshness (0-3) + momentum quality (0-3) — momentum quality rises with steady volume-backed moves, NOT vertical candles.
+6. Prefer candidates whose avg_daily_quote_vol_usd exceeds 50M USD.
+
+# REGIME CLASSIFICATION
+marketRegime = "risk-on" if the majority of strong candidates show sustained positive weekly momentum with healthy liquidity; "risk-off" if most show negative or deteriorating momentum; otherwise "neutral". In "risk-off", return an EMPTY "selected" array — standing aside is a decision.
+
+# OUTPUT CONTRACT
+Raw JSON only, no markdown, no prose, no code fences:
+{"marketRegime":"risk-on|neutral|risk-off","summary":"one line market read","selected":[{"symbol":"SOLUSDT","sector":"Layer-1","narrative":"Layer-1","thesis":"one line why now","strength":8}]}"""
+
+# [MHF-V3.1-CRASH-SENTINEL] برومبت السائل اليومي لمحرك التنبؤ بالانهيارات — شامل/احترافي/مضبوط المخرجات
+PROMPT_CRASH_SENTINEL = """# ROLE
+You are the CRASH SENTINEL of a crypto micro hedge fund ($400 AUM), SPOT LONG-ONLY on Binance. Once per day you judge the probability of a BROAD SYSTEMIC CRASH — a fast, deep, correlated selloff across majors — over the next 24-72 hours. You never judge individual coins.
+
+# INPUTS (JSON snapshot)
+btc_24h_pct / eth_24h_pct, btc_ret3 (rolling 3-day BTC return %), btc_vol20 (stdev of last 20 daily returns %, annualization-free), btc_below_ema20 (bool), eth_below_ema20 (bool), and current UTC date.
+
+# MEASURED EVIDENCE FROM THIS FUND'S BACKTEST (90 pairs, 167 days)
+- Trades entered while btc_ret3 <= -3%: 30.7% winners, -$255.79 aggregate (the ONLY toxic zone).
+- Trades entered while btc_ret3 in (-3%, 0%): 67.5% winners, +$451.90 aggregate.
+- Breadth deterioration (majors falling together) + volatility expansion preceded the worst weeks.
+
+# JUDGMENT RULES
+1. Be FALSE-ALARM-TOLERANT but CRASH-AVERSE: prefer "elevated" over "high" unless momentum AND volatility AND breadth align bearishly.
+2. "high" means: credible risk of an imminent correlated selloff (>= -6% BTC within 72h). Reserve it for genuine confluence — a quiet pullback is "watch", not "storm".
+3. "unknown" when inputs look stale, partial or inconsistent (with low confidence).
+4. Scale confidence 1-10 = breadth of evidence (0-4) + volatility confirmation (0-3) + momentum alignment (0-3).
+
+# OUTPUT CONTRACT
+Raw JSON only, no markdown, no prose, no code fences:
+{"regime":"calm|watch|storm|unknown","crash_risk":"low|elevated|high|unknown","confidence":1-10,"horizon_hours":24-72,"breadth_score":0-10,"summary":"one line market read"}"""
+
+# [MHF-V3.2-FIVE-ENGINES] برومبت السائل اليومي لمحرك التنبؤ بالانفجارات — مرآة عقد Sentinel
+PROMPT_MOONSHOT_SENTINEL = """# ROLE
+You are the MOONSHOT SENTINEL of a crypto micro hedge fund ($400 AUM), SPOT LONG-ONLY on Binance. Once per day you judge the probability of a BROAD EXPLOSIVE UPSIDE phase — a correlated thrust where majors expand 8-25% within days — over the next 24-72 hours. You never chase single coins; you judge the WIND that lifts them.
+
+# INPUTS (JSON snapshot)
+btc_24h_pct / eth_24h_pct, btc_ret3 (rolling 3-day BTC return %), btc_ret7, btc_vol20 (stdev of last 20 daily returns %), btc_above_ema20 (bool), squeeze (true when btc_vol20 sits in the lowest third of its own 90-day range — compressed energy), and current UTC date.
+
+# MEASURED EVIDENCE FROM THIS FUND'S BACKTEST (90 pairs, 167 days)
+- Entries while btc_ret3 > +3%: 100% non-losing (0 full stop-losses), +$6.17 average per trade.
+- The two best weeks (+$381, +$131) followed breadth ignition, not vertical candles.
+- Winners reaching the far target (+22.4%) mostly STARTED in quiet uptrends, NOT in late parabolic phases.
+
+# JUDGMENT RULES
+1. Be OPPORTUNITY-TOLERANT but PARABOLA-AVERSE: "launch" requires momentum ignition WITHOUT blow-off excess (btc_ret3 between +2% and +12%; above that, suspect exhaustion -> "thrust" at best).
+2. "high" explosion_risk only when ignition + breadth expansion + (squeeze release OR trend alignment above EMA20) agree.
+3. "unknown" when inputs look stale, partial or inconsistent (with low confidence).
+4. boost_symbols: AT MOST 3 symbols chosen ONLY from "candidates" array — steady leaders above their own 20-day averages, never today's top vertical movers.
+
+# OUTPUT CONTRACT
+Raw JSON only, no markdown, no prose, no code fences:
+{"regime":"calm|thrust|launch|unknown","explosion_risk":"low|elevated|high|unknown","confidence":1-10,"horizon_hours":24-72,"boost_symbols":["SOLUSDT"],"summary":"one line market read"}"""
 
 PROMPT_ONCHAIN = """# ROLE
 You are the ON-CHAIN & LIQUIDITY ANALYST of a micro hedge fund trading Binance SPOT.
@@ -844,6 +1021,278 @@ class Journal:
 # ==============================================================================
 
 
+class CrashSentinel:
+    """[MHF-V3.1-CRASH-SENTINEL] العضو الخامس في الفريق: بوابة حظر دخول عند خطر انهيار مؤكد.
+
+    طبقتان تعمل كلتاهما باستقلال:
+      ① حتمية قابلة للباكتست: عائد BTC المتدحرج 3 أيام ≤ CRASH_BTC_RET3_THRESHOLD
+        (قاعدة مستخرجة من تجميع الخسائر المقيس: تلك المنطقة نجاحها 30.7% فقط بخسارة −255.79$)
+      ② سؤال LLM شامل يُطرح مرة كل 24 ساعة (تخزين مؤقت ذاكرة+قرص) بحكم systemic فقط —
+        «high» يحظر، «elevated» تحذير، وعند فشل LLM تحكم الحتمية وحدها.
+    لا يمس المراكز المفتوحة إطلاقاً — بوابة دخول جديدة فقط.
+    """
+
+    TTL_SECONDS: int = 24 * 60 * 60
+
+    def __init__(self, client: Optional[BinanceClient] = None, llm: Optional[KeylessLLM] = None,
+                 state_path: Optional[str] = None):
+        self.client = client
+        self.llm = llm
+        self.state_path = state_path
+        self._verdict: Optional[Dict[str, Any]] = None  # آخر حكم LLM صالح ضمن TTL
+
+    # ---------------------------------------------------------------- layer 1
+    @staticmethod
+    def deterministic_risk(btc_d1: Sequence[Candle]) -> Dict[str, Any]:
+        """قاعدة القياس: عائد BTC المتدحرج 3 أيام عند آخر إغلاق يومي."""
+        closes = [c.close for c in btc_d1]
+        if len(closes) < 5:
+            return {"regime": "unknown", "veto": False, "ret3": None,
+                    "reason": "insufficient BTC history"}
+        ret3 = (closes[-1] / closes[-4] - 1) * 100.0
+        threshold = getattr(SOP, "CRASH_BTC_RET3_THRESHOLD", -3.0)
+        if ret3 <= threshold:
+            return {"regime": "storm", "veto": True, "ret3": round(ret3, 2),
+                    "reason": f"BTC 3d return {ret3:+.1f}% <= {threshold}%"}
+        return {"regime": "calm", "veto": False, "ret3": round(ret3, 2),
+                "reason": f"BTC 3d {ret3:+.1f}%"}
+
+    # ---------------------------------------------------------------- layer 2
+    def _load_stored(self) -> Optional[Dict[str, Any]]:
+        """استرجاع حكم المخزن على القرص إن كان طازجاً — يحمي من إعادة سؤال بعد كل ريستارت."""
+        if not self.state_path or not os.path.exists(self.state_path):
+            return None
+        try:
+            with open(self.state_path, "r", encoding="utf-8") as fh:
+                stored = json.load(fh)
+            if time.time() - float(stored.get("ts", 0)) < self.TTL_SECONDS:
+                return stored.get("verdict")
+        except Exception as e:
+            log("WARN", f"CrashSentinel stored verdict unreadable: {e}")
+        return None
+
+    def _store(self, verdict: Dict[str, Any]) -> None:
+        if not self.state_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
+            tmp = f"{self.state_path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"ts": time.time(), "verdict": verdict}, fh)
+            os.replace(tmp, self.state_path)
+        except Exception as e:
+            log("WARN", f"CrashSentinel verdict store failed: {e}")
+
+    def _snapshot_prompt(self, btc_d1: Sequence[Candle], tickers: Dict[str, Dict[str, Any]]) -> str:
+        """لقطة السوق النصية المُطعمة للسؤال اليومي — كلها من بيانات متاحة فعلاً."""
+        closes = [c.close for c in btc_d1]
+        rets = [closes[i] / closes[i - 1] - 1 for i in range(1, len(closes))][-20:]
+        mean = sum(rets) / len(rets) if rets else 0.0
+        var = sum((r - mean) ** 2 for r in rets) / len(rets) if rets else 0.0
+        ema20 = Indicators.ema(closes, SOP.EMA_FAST) if len(closes) >= SOP.EMA_FAST else None
+        snap = {
+            "date_utc": datetime.now(timezone.utc).isoformat()[:10],
+            "btc_24h_pct": tickers.get("BTCUSDT", {}).get("price_change_pct"),
+            "eth_24h_pct": tickers.get("ETHUSDT", {}).get("price_change_pct"),
+            "btc_ret3": round((closes[-1] / closes[-4] - 1) * 100.0, 2) if len(closes) >= 4 else None,
+            "btc_vol20": round(var ** 0.5 * 100.0, 2),
+            "btc_below_ema20": bool(ema20 is not None and closes[-1] < ema20),
+        }
+        return json.dumps({"task": "Judge systemic crash risk for next 24-72h", "snapshot": snap}, indent=2)
+
+    def _llm_verdict(self, btc_d1: Sequence[Candle], tickers: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """حكم LLM مخزَّن 24 ساعة — لا سؤالين في اليوم مهما تكرر المسح."""
+        if self._verdict and time.time() - self._verdict.get("asked_at", 0) < self.TTL_SECONDS:
+            return self._verdict["data"]
+        stored = self._load_stored()
+        if stored:
+            if not self._verdict:
+                self._verdict = {"asked_at": time.time(), "data": stored}
+            return stored
+        if not self.llm or not self.llm.enabled:
+            return None
+        if not tickers and self.client is not None:  # لا نطلب الشبكة إلا لحظة السؤال اليومي فعلاً
+            try:
+                tickers = {"BTCUSDT": self.client.ticker_24h("BTCUSDT"),
+                           "ETHUSDT": self.client.ticker_24h("ETHUSDT")}
+            except BinanceError as e:
+                log("WARN", f"CrashSentinel ticker fetch failed (LLM skipped this scan): {e}")
+        parsed = self.llm.ask_json(PROMPT_CRASH_SENTINEL, self._snapshot_prompt(btc_d1, tickers))
+        if not parsed:
+            return None
+        data = {
+            "crash_risk": str(parsed.get("crash_risk", "unknown")).lower(),
+            "regime": str(parsed.get("regime", "unknown")).lower(),
+            "confidence": max(1, min(10, int(parsed.get("confidence") or 1))),
+            "summary": str(parsed.get("summary", ""))[:200],
+        }
+        self._verdict = {"asked_at": time.time(), "data": data}
+        self._store(data)
+        return data
+
+    # ---------------------------------------------------------------- verdict
+    def assess(self, btc_d1: Optional[Sequence[Candle]] = None,
+               tickers: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """الحكم الموحد: حظر إن قالت الحتمية «عاصفة» أو قال LLM «high»."""
+        det = self.deterministic_risk(btc_d1) if btc_d1 else {"regime": "unknown", "veto": False,
+                                                               "ret3": None, "reason": "no BTC data"}
+        llm_v = self._llm_verdict(btc_d1 or [], tickers or {}) if getattr(SOP, "CRASH_SENTINEL", False) else None
+        llm_high = bool(llm_v and llm_v.get("crash_risk") == "high")
+        veto = bool(det.get("veto")) or llm_high
+        source = "deterministic+llm" if det.get("veto") and llm_high else (
+            "deterministic" if det.get("veto") else ("llm" if llm_high else ("llm" if llm_v else "deterministic")))
+        regime = ("storm" if veto else
+                  (llm_v.get("regime") if llm_v and llm_v.get("regime") != "unknown" else det.get("regime")))
+        reason = det.get("reason", "")
+        if llm_v:
+            reason += f" | LLM: {llm_v['crash_risk']} ({llm_v['summary']})"
+        verdict = {"veto": veto, "regime": regime, "source": source, "reason": reason,
+                   "deterministic": det, "llm": llm_v}
+        log("INFO", f"CRASH-SENTINEL: veto={veto} regime={regime} via {source} — {reason}")
+        return verdict
+
+
+class MoonshotSentinel:
+    """[MHF-V3.2-FIVE-ENGINES] مرآة CrashSentinel للاتجاه الصاعد: التقاط أنظمة الانفجار بلا مطاردة شمول.
+
+    طبقتان:
+      ① حتمية قابلة للباكتست: عائد BTC المتدحرج 3 أيام ≥ MOONSHOT_BTC_RET3_THRESHOLD —
+        مقيس: تلك الدخولات 100% غير خاسرة (صفر وقف كامل) بمتوسط +$6.17.
+      ② سؤال LLM يومي (تخزين 24س ذاكرة+قرص): انفجار مؤكد «launch» + حتى 3 رموز تعزيز —
+        أثره المحدود والمعلن: تمديد الإيقاف الزمني ×MOONSHOT_TSTOP_MULT، لا تخفيف أي بوابة دخول.
+    """
+
+    TTL_SECONDS: int = 24 * 60 * 60
+
+    def __init__(self, client: Optional[BinanceClient] = None, llm: Optional[KeylessLLM] = None,
+                 state_path: Optional[str] = None):
+        self.client = client
+        self.llm = llm
+        self.state_path = state_path
+        self._verdict: Optional[Dict[str, Any]] = None
+
+    # ---------------------------------------------------------------- layer 1
+    @staticmethod
+    def deterministic_regime(btc_d1: Sequence[Candle]) -> Dict[str, Any]:
+        """مرآة عتبة الانهيار: عائد BTC المتدحرج 3 أيام عند آخر إغلاق يومي."""
+        closes = [c.close for c in btc_d1]
+        if len(closes) < 5:
+            return {"regime": "unknown", "moonshot": False, "ret3": None,
+                    "reason": "insufficient BTC history"}
+        ret3 = (closes[-1] / closes[-4] - 1) * 100.0
+        threshold = getattr(SOP, "MOONSHOT_BTC_RET3_THRESHOLD", 3.0)
+        if ret3 >= threshold:
+            return {"regime": "launch", "moonshot": True, "ret3": round(ret3, 2),
+                    "reason": f"BTC 3d return {ret3:+.1f}% >= +{threshold}%"}
+        return {"regime": "calm", "moonshot": False, "ret3": round(ret3, 2),
+                "reason": f"BTC 3d {ret3:+.1f}%"}
+
+    # ---------------------------------------------------------------- layer 2
+    def _load_stored(self) -> Optional[Dict[str, Any]]:
+        if not self.state_path or not os.path.exists(self.state_path):
+            return None
+        try:
+            with open(self.state_path, "r", encoding="utf-8") as fh:
+                stored = json.load(fh)
+            if time.time() - float(stored.get("ts", 0)) < self.TTL_SECONDS:
+                return stored.get("verdict")
+        except Exception as e:
+            log("WARN", f"MoonshotSentinel stored verdict unreadable: {e}")
+        return None
+
+    def _store(self, verdict: Dict[str, Any]) -> None:
+        if not self.state_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
+            tmp = f"{self.state_path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"ts": time.time(), "verdict": verdict}, fh)
+            os.replace(tmp, self.state_path)
+        except Exception as e:
+            log("WARN", f"MoonshotSentinel verdict store failed: {e}")
+
+    def _snapshot_prompt(self, btc_d1: Sequence[Candle], tickers: Dict[str, Dict[str, Any]],
+                         candidates: Sequence[str]) -> str:
+        closes = [c.close for c in btc_d1]
+        rets = [closes[i] / closes[i - 1] - 1 for i in range(1, len(closes))][-20:]
+        mean = sum(rets) / len(rets) if rets else 0.0
+        var = sum((r - mean) ** 2 for r in rets) / len(rets) if rets else 0.0
+        vol20 = var ** 0.5 * 100.0
+        vol_hist = []
+        for j in range(max(2, len(closes) - 110), len(closes)):
+            win = [closes[k] / closes[k - 1] - 1 for k in range(max(1, j - 20), j)]
+            m2 = sum(win) / len(win) if win else 0.0
+            vol_hist.append((sum((x - m2) ** 2 for x in win) / len(win) if win else 0.0) ** 0.5 * 100.0)
+        ema20 = Indicators.ema(closes, SOP.EMA_FAST) if len(closes) >= SOP.EMA_FAST else None
+        snap = {
+            "date_utc": datetime.now(timezone.utc).isoformat()[:10],
+            "btc_24h_pct": tickers.get("BTCUSDT", {}).get("price_change_pct"),
+            "eth_24h_pct": tickers.get("ETHUSDT", {}).get("price_change_pct"),
+            "btc_ret3": round((closes[-1] / closes[-4] - 1) * 100.0, 2) if len(closes) >= 4 else None,
+            "btc_ret7": round((closes[-1] / closes[-8] - 1) * 100.0, 2) if len(closes) >= 8 else None,
+            "btc_vol20": round(vol20, 2),
+            "btc_above_ema20": bool(ema20 is not None and closes[-1] > ema20),
+            "squeeze": bool(vol_hist and vol20 <= sorted(vol_hist)[max(0, len(vol_hist) // 3)]),
+            "candidates": list(candidates)[:10],
+        }
+        return json.dumps({"task": "Judge broad explosion probability for next 24-72h", "snapshot": snap}, indent=2)
+
+    def _llm_verdict(self, btc_d1: Sequence[Candle], tickers: Dict[str, Dict[str, Any]],
+                     candidates: Sequence[str]) -> Optional[Dict[str, Any]]:
+        if self._verdict and time.time() - self._verdict.get("asked_at", 0) < self.TTL_SECONDS:
+            return self._verdict["data"]
+        stored = self._load_stored()
+        if stored:
+            if not self._verdict:
+                self._verdict = {"asked_at": time.time(), "data": stored}
+            return stored
+        if not self.llm or not self.llm.enabled:
+            return None
+        parsed = self.llm.ask_json(PROMPT_MOONSHOT_SENTINEL,
+                                   self._snapshot_prompt(btc_d1, tickers, candidates))
+        if not parsed:
+            return None
+        data = {
+            "explosion_risk": str(parsed.get("explosion_risk", "unknown")).lower(),
+            "regime": str(parsed.get("regime", "unknown")).lower(),
+            "confidence": max(1, min(10, int(parsed.get("confidence") or 1))),
+            "boost_symbols": [str(s).upper() for s in (parsed.get("boost_symbols") or []) if s][:3],
+            "summary": str(parsed.get("summary", ""))[:200],
+        }
+        self._verdict = {"asked_at": time.time(), "data": data}
+        self._store(data)
+        return data
+
+    # ---------------------------------------------------------------- verdict
+    def assess(self, btc_d1: Optional[Sequence[Candle]] = None,
+               tickers: Optional[Dict[str, Dict[str, Any]]] = None,
+               candidates: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+        det = self.deterministic_regime(btc_d1) if btc_d1 else {"regime": "unknown", "moonshot": False,
+                                                                 "ret3": None, "reason": "no BTC data"}
+        if getattr(SOP, "MOONSHOT_SENTINEL", False):
+            if tickers is None and self.client is not None and self.llm and self.llm.enabled \
+                    and self._verdict is None and self._load_stored() is None:
+                try:
+                    tickers = {"BTCUSDT": self.client.ticker_24h("BTCUSDT"),
+                               "ETHUSDT": self.client.ticker_24h("ETHUSDT")}
+                except BinanceError as e:
+                    log("WARN", f"MoonshotSentinel ticker fetch failed (LLM skipped this scan): {e}")
+            llm_v = self._llm_verdict(btc_d1 or [], tickers or {}, candidates or [])
+        else:
+            llm_v = None
+        llm_launch = bool(llm_v and llm_v.get("regime") == "launch")
+        moonshot = bool(det.get("moonshot")) or llm_launch
+        boost = sorted({s for s in (llm_v or {}).get("boost_symbols", [])}) if llm_v else []
+        src = "deterministic+llm" if det.get("moonshot") and llm_launch else (
+            "deterministic" if det.get("moonshot") else ("llm" if llm_launch else ("llm" if llm_v else "deterministic")))
+        verdict = {"moonshot": moonshot, "regime": "launch" if moonshot else det.get("regime"),
+                   "source": src, "boost_symbols": boost, "reason": det.get("reason", ""),
+                   "deterministic": det, "llm": llm_v}
+        log("INFO", f"MOONSHOT-SENTINEL: moonshot={moonshot} boost={boost} via {src} — {det.get('reason','')}")
+        return verdict
+
+
 class NarrativeAgent:
     """STAGE 1 — narrative / momentum shortlist from the whitelist."""
 
@@ -901,8 +1350,9 @@ class NarrativeAgent:
         llm_used = False
 
         if self.llm and self.llm.enabled:
+            prompt = PROMPT_NARRATIVE_V3 if getattr(SOP, "STAGED_EXITS", False) else PROMPT_NARRATIVE
             parsed = self.llm.ask_json(
-                PROMPT_NARRATIVE,
+                prompt,
                 json.dumps({"task": "Select up to 5 strongest narratives", "candidates": liquid}, indent=2),
             )
             if parsed and isinstance(parsed.get("selected"), list):
@@ -912,11 +1362,29 @@ class NarrativeAgent:
                         "symbol": str(s.get("symbol", "")).upper(),
                         "narrative": s.get("narrative", "Unspecified"),
                         "thesis": s.get("thesis", ""),
-                        "strength": int(s.get("strength") or 5),
+                        "strength": max(1, min(10, int(s.get("strength") or 5))),
                     }
                     for s in parsed["selected"]
                     if str(s.get("symbol", "")).upper() in allowed
-                ][:SOP.NARRATIVE_SHORTLIST_SIZE]
+                ]
+                if getattr(SOP, "STAGED_EXITS", False):
+                    if str(parsed.get("marketRegime", "")).lower() == "risk-off":
+                        log("INFO", "STAGE 1 (LLM): marketRegime=risk-off — الانسحاب قرار، لا مرشحين")
+                        return {"passed": False, "llm_used": True,
+                                "reason": "LLM regime veto: risk-off.", "candidates": []}
+                    # ضبط قطاعي إلزامي بعد الرد: سقف رمزين لكل قطاع (حتى لو تجاوز النموذج)
+                    sector_counts: Dict[str, int] = {}
+                    diversified: List[Dict[str, Any]] = []
+                    for s in selected:
+                        raw = parsed["selected"]
+                        sector = next((str(x.get("sector", s["narrative"])) for x in raw
+                                       if str(x.get("symbol", "")).upper() == s["symbol"]), s["narrative"])
+                        if sector_counts.get(sector, 0) >= 2:
+                            continue
+                        sector_counts[sector] = sector_counts.get(sector, 0) + 1
+                        diversified.append(s)
+                    selected = diversified
+                selected = selected[:SOP.NARRATIVE_SHORTLIST_SIZE]
                 llm_used = bool(selected)
 
         if not selected:
@@ -1055,9 +1523,13 @@ class TechnicalAgent:
         failures: List[str] = []
         if not d1["uptrend"]:
             failures.append(f"D1 not bullish (EMA20 {d1['ema20']} <= EMA50 {d1['ema50']})")
-        if not h4["breakout"]["breakout"]:
-            failures.append(f"H4 breakout missing ({h4['breakout']['reason']})")
-        if not h4["rsi_in_range"]:
+        # v3: يكفي تحقق إحدى عائلتي الإعداد — اختراق تجميع أو تراجع مع الاتجاه
+        pb = h4.get("pullback_dip", {})
+        is_breakout = bool(h4["breakout"]["breakout"])
+        is_pullback = bool(pb.get("pullback"))
+        if not is_breakout and not is_pullback:
+            failures.append(f"H4 setup missing ({h4['breakout']['reason']}; {pb.get('reason', 'no pullback')})")
+        elif is_breakout and not h4["rsi_in_range"]:
             failures.append(f"H4 RSI {h4['rsi14']} outside {SOP.RSI_MIN}-{SOP.RSI_MAX}")
         if d1["rsi14"] is not None and d1["rsi14"] >= SOP.D1_RSI_OVERBOUGHT:
             failures.append(f"D1 RSI {d1['rsi14']} overbought")
@@ -1139,6 +1611,15 @@ class RiskManager:
         """
         stop_loss = entry_price * (1 - (SOP.MAX_RISK_PER_TRADE_USD / position_size_usd))
         take_profit = entry_price * (1 + (SOP.TARGET_PROFIT_PER_TRADE_USD / position_size_usd))
+        staged = bool(getattr(SOP, "STAGED_EXITS", False))
+        if staged:
+            tp1 = entry_price * (1 + SOP.STAGE1_TP_PCT / 100.0)
+            tp2 = entry_price * (1 + SOP.STAGE2_TP_PCT / 100.0)
+            reward = position_size_usd * 0.5 * (SOP.STAGE1_TP_PCT + SOP.STAGE2_TP_PCT) / 100.0
+            take_profit = tp2  # مرجعية الرصد الصحفي: نهاية الأدراج
+        else:
+            tp1 = tp2 = take_profit
+            reward = SOP.TARGET_PROFIT_PER_TRADE_USD
         quantity = position_size_usd / entry_price
         return {
             "entry_price": entry_price,
@@ -1146,10 +1627,13 @@ class RiskManager:
             "quantity": quantity,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
+            "take_profit_1": tp1,
+            "take_profit_2": tp2,
             "stop_limit_price": stop_loss * 0.998,
             "risk_usd": SOP.MAX_RISK_PER_TRADE_USD,
-            "reward_usd": SOP.TARGET_PROFIT_PER_TRADE_USD,
+            "reward_usd": reward,
             "risk_reward_ratio": SOP.RISK_REWARD_RATIO,
+            "staged_exits": staged,
             "stop_loss_pct": round((stop_loss - entry_price) / entry_price * 100, 2),
             "take_profit_pct": round((take_profit - entry_price) / entry_price * 100, 2),
         }
@@ -1222,8 +1706,34 @@ class StrategyPipeline:
         self.onchain = OnChainAgent(self.client, self.llm)
         self.technical = TechnicalAgent(self.client, self.llm)
         self.risk = RiskManager(self.client, self.journal)
+        # [MHF-V3.1-CRASH-SENTINEL] العضو الخامس — حكم يومي مخزَّن قرب سجل الصفقات
+        sentinel_state = (os.path.join(os.path.dirname(self.journal.path), "crash_sentinel.json")
+                          if getattr(self.journal, "path", None) else None)
+        self.sentinel = CrashSentinel(self.client, self.llm, state_path=sentinel_state)
+        # [MHF-V3.2-FIVE-ENGINES] العضو السادس (انفجار) + سجل القمع المستدام — تخزين بمحاذاة السجل
+        state_dir = os.path.dirname(self.journal.path) if getattr(self.journal, "path", None) else None
+        self.moonshot = MoonshotSentinel(
+            self.client, self.llm,
+            state_path=(os.path.join(state_dir, "moonshot_sentinel.json") if state_dir else None))
+        self.funnel = FunnelLedger(
+            os.path.join(state_dir, "funnel_ledger.jsonl") if state_dir else "funnel_ledger.jsonl")
+        self._stage_counts = {"s1": 0, "s2": 0, "s3": 0, "signal": 0}
+        self._moonshot_verdict: Optional[Dict[str, Any]] = None
 
     def run(self) -> Dict[str, Any]:
+        """واجهة المسح — تغلف التنفيذ بتدوين قمع المراحل مهما كان مسار الخروج (لا يرمي أبداً)."""
+        try:
+            return self._run_impl()
+        finally:
+            c = self._stage_counts
+            try:
+                self.funnel.record(datetime.now(timezone.utc).isoformat()[:10],
+                                   c["s1"], c["s2"], c["s3"], c["signal"])
+            except Exception:
+                pass
+            self._stage_counts = {"s1": 0, "s2": 0, "s3": 0, "signal": 0}
+
+    def _run_impl(self) -> Dict[str, Any]:
         started = time.time()
         self.journal.reconcile()
 
@@ -1233,14 +1743,48 @@ class StrategyPipeline:
             return {"ok": False, "halted": True, "reason": " | ".join(breakers["reasons"])}
 
         s1 = self.narrative.run()
+        self._stage_counts["s1"] = len(s1.get("candidates", []))
         if not s1["passed"]:
             return {"ok": False, "reason": f"Stage 1 failed: {s1['reason']}", "duration": time.time() - started}
 
+        # [MHF-V3-UPGRADE] بوابة نظام السوق — لا مسح وBTC تحت EMA20/EMA50 يومي (جلب واحد، غير حاجب عند التعذر)
+        if getattr(SOP, "BTC_REGIME_GATE", False) or getattr(SOP, "CRASH_SENTINEL", False):
+            try:
+                btc_d1 = self.client.klines("BTCUSDT", SOP.TF_D1, SOP.DAILY_LOOKBACK)
+                if getattr(SOP, "BTC_REGIME_GATE", False):
+                    btc_trend = Backtester._daily_trend_map(btc_d1)
+                    if btc_trend and not btc_trend[-1][1]:
+                        return {"ok": False,
+                                "reason": f"BTC regime gate: BTCUSDT daily EMA20<=EMA50 (قف {btc_trend[-1][0]}).",
+                                "duration": time.time() - started}
+                # [MHF-V3.1-CRASH-SENTINEL] بوابة التنبؤ بالانهيار — حتمي + حكم LLM اليومي المخزَّن
+                if getattr(SOP, "CRASH_SENTINEL", False):
+                    verdict = self.sentinel.assess(btc_d1=btc_d1)
+                    if verdict.get("veto"):
+                        return {"ok": False,
+                                "reason": f"CrashSentinel veto ({verdict['source']}): {verdict['reason']}",
+                                "duration": time.time() - started}
+                # [MHF-V3.2-FIVE-ENGINES] حكم الانفجار — تعزيز فقط (لا يمنع ولا يخفف أي بوابة أبداً)
+                if getattr(SOP, "MOONSHOT_SENTINEL", False):
+                    self._moonshot_verdict = self.moonshot.assess(
+                        btc_d1=btc_d1, candidates=[c["symbol"] for c in s1.get("candidates", [])])
+                else:
+                    self._moonshot_verdict = {"moonshot": False, "boost_symbols": []}
+            except BinanceError as e:
+                log("WARN", f"BTC regime gate fetch failed (non-blocking): {e}")
+            except Exception as e:
+                log("WARN", f"BTC regime gate failed (non-blocking): {type(e).__name__}: {e}")
+        else:
+            self._moonshot_verdict = self.moonshot.assess() if getattr(SOP, "MOONSHOT_SENTINEL", False) \
+                else {"moonshot": False, "boost_symbols": []}
+
         s2 = self.onchain.run(s1["candidates"])
+        self._stage_counts["s2"] = len(s2.get("survivors", []))
         if not s2["passed"]:
             return {"ok": False, "reason": f"Stage 2 failed: {s2['reason']}", "duration": time.time() - started}
 
         s3 = self.technical.run(s2["survivors"])
+        self._stage_counts["s3"] = len(s3.get("survivors", []))
         if not s3["passed"]:
             return {"ok": False, "reason": f"Stage 3 failed: {s3['reason']}", "duration": time.time() - started}
 
@@ -1248,7 +1792,19 @@ class StrategyPipeline:
         if not s4["approved"]:
             return {"ok": False, "reason": f"Stage 4 rejected: {s4['reason']}", "duration": time.time() - started}
 
-        return {"ok": True, "signal": s4["signal"], "duration": time.time() - started}
+        self._stage_counts["signal"] = 1
+        signal = s4["signal"]
+        # [MHF-V3.2-FIVE-ENGINES] تعزيز الإيقاف الزمني لراكبي الموجة (نظام انفجار أو رمز معزز يومياً)
+        mv = self._moonshot_verdict or {"moonshot": False, "boost_symbols": []}
+        # التمديد المقيس مرفوض بمحاكاة المحفظة — التعزيز تلميتري/تنبيه فقط طالما TIME_STOP_EXT_ENABLE=False
+        if getattr(SOP, "STAGED_EXITS", False) and getattr(SOP, "TIME_STOP_EXT_ENABLE", False):
+            boosted = bool(mv.get("moonshot")) or signal.get("symbol") in (mv.get("boost_symbols") or [])
+            if boosted:
+                signal["moonshot_boost"] = True
+                signal["time_stop_days"] = max(
+                    1, int(getattr(SOP, "TIME_STOP_DAYS", 10) * getattr(SOP, "MOONSHOT_TSTOP_MULT", 2.0)))
+                log("INFO", f"MOONSHOT boost applied to {signal['symbol']}: time_stop={signal['time_stop_days']}d")
+        return {"ok": True, "signal": signal, "duration": time.time() - started}
 
 
 # ==============================================================================
@@ -1262,17 +1818,25 @@ class BacktestResult:
     trades: int = 0
     wins: int = 0
     losses: int = 0
+    scratches: int = 0               # v3: تعادل بعد تحقيق T1 (قمة/وقف عند التعادل)
     open_at_end: int = 0
     pnl_usd: float = 0.0
+    setups: Dict[str, int] = field(default_factory=dict)  # v3: breakout/pullback
+    sentinel_blocks: int = 0                # v3.1: دخولات منعها محرك التنبؤ بالانهيارات
     log: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def win_rate(self) -> float:
         return round(self.wins / self.trades * 100, 1) if self.trades else 0.0
 
+    @property
+    def non_losing_rate(self) -> float:
+        return round((self.wins + self.scratches) / self.trades * 100, 1) if self.trades else 0.0
+
     def summary(self) -> str:
-        return (f"{self.symbol:<12} trades={self.trades:<3} W/L={self.wins}/{self.losses:<3} "
-                f"win%={self.win_rate:<6} PnL={fmt_money(self.pnl_usd)}")
+        blocks = f" blocks={self.sentinel_blocks}" if self.sentinel_blocks else ""
+        return (f"{self.symbol:<12} trades={self.trades:<3} W/S/L={self.wins}/{self.scratches}/{self.losses:<3} "
+                f"win%={self.win_rate:<6} non-losing%={self.non_losing_rate:<6} PnL={fmt_money(self.pnl_usd)}{blocks}")
 
 
 class Backtester:
@@ -1286,6 +1850,60 @@ class Backtester:
 
     def __init__(self, client: Optional[BinanceClient] = None):
         self.client = client or BinanceClient()
+        self._btc_d1_cache: Optional[Sequence[Candle]] = None  # يُعاد استخدامها على رموز الجولة الواحدة
+
+    # ---- [MHF-V3.2-FIVE-ENGINES] نواة مشتركة بين مسار الزوج الواحد ومحاكاة المحفظة ----------
+    @staticmethod
+    def _cost_rate() -> float:
+        """معدل كلفة الطرف الواحد (عمولة+انزلاق) — صفر في v2 ⟵ رياضيات v2 حرفية بلا تغيير."""
+        if not getattr(SOP, "SIM_FEES", False):
+            return 0.0
+        return (SOP.SIM_FEE_PCT + SOP.SIM_SLIPPAGE_PCT) / 100.0
+
+    @staticmethod
+    def _setup_of(window: Sequence[Candle]) -> Optional[str]:
+        """إعداد H4 عند آخر شمعة مغلقة: اختراق (بنطاق RSI) أو تراجع صحي (v3)."""
+        closes = [c.close for c in window]
+        rsi_val = Indicators.rsi(closes, SOP.RSI_PERIOD)
+        if rsi_val is None:
+            return None
+        brk = Indicators.consolidation_breakout(window)
+        if brk["breakout"] and (SOP.RSI_MIN < rsi_val < SOP.RSI_MAX):
+            return "breakout"
+        if bool(getattr(SOP, "STAGED_EXITS", False)):
+            pb = Indicators.pullback_dip(window)
+            if pb["pullback"]:
+                return "pullback"
+        return None
+
+    @classmethod
+    def _close_amount(cls, position: Dict[str, Any], exit_price: float) -> float:
+        """صافي PnL لإغلاق المتبقي — يخصم مخصومات الدخول المسجلة + كلفة خروج الكمية الباقية."""
+        rate = cls._cost_rate()
+        return (position["realized"] + (exit_price - position["entry_price"]) * position["qty_left"]
+                - position.get("costs", 0.0) - exit_price * position["qty_left"] * rate)
+
+    @staticmethod
+    def _maybe_exit(position: Dict[str, Any], candle: Candle, i: int, staged: bool, rate: float
+                    ) -> Optional[Tuple[float, str]]:
+        """إدارة شمعة واحدة لمركز مفتوح — الأولوية ذاتها دائماً: وقف/BE ثم أهداف ثم زمن."""
+        if candle.low <= position["stop_loss"]:
+            return position["stop_loss"], ("BE_PROTECT" if position.get("half_done") else "STOP_LOSS")
+        if not staged and candle.high >= position["tp2"]:
+            return position["tp2"], "TAKE_PROFIT"
+        if staged:
+            if not position["half_done"] and candle.high >= position["tp1"]:
+                half = position["quantity"] / 2.0
+                position["realized"] += (position["tp1"] - position["entry_price"]) * half
+                position["costs"] = position.get("costs", 0.0) + position["tp1"] * half * rate
+                position["qty_left"] -= half
+                position["half_done"] = True
+                position["stop_loss"] = position["entry_price"]  # تعليق الوقف عند التعادل
+            if position["half_done"] and candle.high >= position["tp2"]:
+                return position["tp2"], "TAKE_PROFIT_T2"
+        if position.get("tstop_bars") and (i - position["entry_i"]) >= position["tstop_bars"]:
+            return candle.close, "TIME_STOP"
+        return None
 
     @staticmethod
     def _daily_trend_map(d1: Sequence[Candle]) -> List[Tuple[int, bool, Optional[float]]]:
@@ -1313,9 +1931,18 @@ class Backtester:
         result = BacktestResult(symbol=symbol)
         h4 = self.client.klines(symbol, SOP.TF_H4, h4_limit)
         d1 = self.client.klines(symbol, SOP.TF_D1, d1_limit)
-        return self.run_on_data(symbol, h4, d1)
+        btc_d1 = None
+        if getattr(SOP, "BTC_REGIME_GATE", False) and self.client is not None and symbol != "BTCUSDT":
+            if self._btc_d1_cache is None:
+                try:
+                    self._btc_d1_cache = self.client.klines("BTCUSDT", SOP.TF_D1, d1_limit)
+                except BinanceError:
+                    self._btc_d1_cache = []  # تعذر الجلب لا يفتح البوابة ولا يغلقها — محافظة على القياس
+            btc_d1 = self._btc_d1_cache or None
+        return self.run_on_data(symbol, h4, d1, btc_d1)
 
-    def run_on_data(self, symbol: str, h4: Sequence[Candle], d1: Sequence[Candle]) -> BacktestResult:
+    def run_on_data(self, symbol: str, h4: Sequence[Candle], d1: Sequence[Candle],
+                    btc_d1: Optional[Sequence[Candle]] = None) -> BacktestResult:
         result = BacktestResult(symbol=symbol)
         trend = self._daily_trend_map(d1)
         if not trend or len(h4) < SOP.EMA_SLOW + SOP.BREAKOUT_LOOKBACK + 5:
@@ -1331,6 +1958,88 @@ class Backtester:
                     break
             return state, drsi
 
+        btc_map = self._daily_trend_map(btc_d1) if btc_d1 else None
+
+        def btc_up_at(ts: int) -> bool:
+            if not btc_map:
+                return True
+            state = False
+            for close_time, up, _ in btc_map:
+                if close_time <= ts:
+                    state = up
+                else:
+                    break
+            return state
+
+        # [MHF-V3.1-CRASH-SENTINEL] نوافذ عاصفة BTC المحسوبة مسبقاً (عائد 3 أيام متدحرج — بلا lookahead)
+        storm_windows: List[Tuple[int, bool]] = []
+        if btc_d1 and getattr(SOP, "CRASH_SENTINEL", False):
+            threshold = SOP.CRASH_BTC_RET3_THRESHOLD
+            closes_b = [c.close for c in btc_d1]
+            for i, c in enumerate(btc_d1):
+                storm = i >= 3 and (closes_b[i] / closes_b[i - 3] - 1) * 100.0 <= threshold
+                storm_windows.append((c.close_time, bool(storm)))
+
+        def crash_veto_at(ts: int) -> bool:
+            state = False
+            for close_time, storm in storm_windows:
+                if close_time <= ts:
+                    state = storm
+                else:
+                    break
+            return state
+
+        # [MHF-V3.2-FIVE-ENGINES] خريطة تمديد الإيقاف الزمني — [M5-EXTENSION-MEASURED]
+        # الرافعة المقيسة: التمديد خارج العواصف (عائد 3أيام ≥ TIME_STOP_EXT_RET3_MIN)، وليس في الانفجار فحسب
+        moonshot_windows: List[Tuple[int, bool]] = []
+        ext_on = bool(getattr(SOP, "TIME_STOP_EXT_ENABLE", False))
+        if btc_d1 and ext_on:
+            m_th = getattr(SOP, "TIME_STOP_EXT_RET3_MIN", -3.0)
+            closes_m = [c.close for c in btc_d1]
+            for i, c in enumerate(btc_d1):
+                moon = i >= 3 and (closes_m[i] / closes_m[i - 3] - 1) * 100.0 >= m_th
+                moonshot_windows.append((c.close_time, bool(moon)))
+
+        def moonshot_at(ts: int) -> bool:
+            state = False
+            for close_time, moon in moonshot_windows:
+                if close_time <= ts:
+                    state = moon
+                else:
+                    break
+            return state
+
+        staged = bool(getattr(SOP, "STAGED_EXITS", False))
+        rate = self._cost_rate()
+        base_tstop_bars = int(getattr(SOP, "TIME_STOP_DAYS", 0) or 0) * 6  # 6 شموع H4 لليوم
+
+        def tstop_bars_at(ts: int) -> int:
+            if not base_tstop_bars:
+                return 0
+            mult = getattr(SOP, "MOONSHOT_TSTOP_MULT", 1.0) if moonshot_at(ts) else 1.0
+            return max(1, int(base_tstop_bars * mult))
+
+        def close_trade(position, exit_price, outcome, exit_ts):
+            pnl = self._close_amount(position, exit_price)
+            result.trades += 1
+            result.pnl_usd += pnl
+            if pnl > 0.01:
+                result.wins += 1
+            elif pnl < -0.01:
+                result.losses += 1
+            else:
+                result.scratches += 1
+            result.log.append({
+                "entry_ts": position["entry_time"],
+                "entry_time": datetime.fromtimestamp(position["entry_time"] / 1000, tz=timezone.utc).isoformat()[:16],
+                "exit_time": datetime.fromtimestamp(exit_ts / 1000, tz=timezone.utc).isoformat()[:16],
+                "entry": round(position["entry_price"], 8),
+                "exit": round(exit_price, 8),
+                "outcome": outcome,
+                "setup": position.get("setup", "breakout"),
+                "pnl_usd": round(pnl, 2),
+            })
+
         position: Optional[Dict[str, Any]] = None
         start = SOP.EMA_SLOW + SOP.BREAKOUT_LOOKBACK + 1
 
@@ -1339,31 +2048,14 @@ class Backtester:
 
             # ---------------- manage an open position (intrabar) ----------------
             if position:
-                hit_stop = candle.low <= position["stop_loss"]
-                hit_target = candle.high >= position["take_profit"]
-                exit_price = outcome = None
-                if hit_stop:                      # conservative: stop wins ties
-                    exit_price, outcome = position["stop_loss"], "STOP_LOSS"
-                elif hit_target:
-                    exit_price, outcome = position["take_profit"], "TAKE_PROFIT"
-
-                if exit_price is not None:
-                    pnl = (exit_price - position["entry_price"]) * position["quantity"]
-                    result.trades += 1
-                    result.pnl_usd += pnl
-                    if pnl > 0:
-                        result.wins += 1
-                    else:
-                        result.losses += 1
-                    result.log.append({
-                        "entry_time": datetime.fromtimestamp(position["entry_time"] / 1000, tz=timezone.utc).isoformat()[:16],
-                        "exit_time": datetime.fromtimestamp(candle.close_time / 1000, tz=timezone.utc).isoformat()[:16],
-                        "entry": round(position["entry_price"], 8),
-                        "exit": round(exit_price, 8),
-                        "outcome": outcome,
-                        "pnl_usd": round(pnl, 2),
-                    })
+                if position["qty_left"] <= 1e-12:
                     position = None
+                    continue
+                res = self._maybe_exit(position, candle, i, staged, rate)
+                if res is not None:
+                    close_trade(position, res[0], res[1], candle.close_time)
+                    position = None
+                    continue
                 continue  # never enter on the same bar we exited
 
             # ---------------- look for a new entry ----------------
@@ -1373,34 +2065,276 @@ class Backtester:
                 continue
             if daily_rsi is not None and daily_rsi >= SOP.D1_RSI_OVERBOUGHT:
                 continue
-
-            closes = [c.close for c in window]
-            rsi_val = Indicators.rsi(closes, SOP.RSI_PERIOD)
-            if rsi_val is None or not (SOP.RSI_MIN < rsi_val < SOP.RSI_MAX):
+            if not btc_up_at(candle.close_time):
+                continue
+            if crash_veto_at(candle.close_time):
+                result.sentinel_blocks += 1
                 continue
 
-            brk = Indicators.consolidation_breakout(window)
-            if not brk["breakout"]:
+            setup = self._setup_of(window)
+            if setup is None:
                 continue
 
             entry_price = candle.close
             levels = RiskManager.compute_levels(entry_price)
             position = {
                 "entry_time": candle.close_time,
+                "entry_i": i,
                 "entry_price": entry_price,
                 "quantity": levels["quantity"],
+                "qty_left": levels["quantity"],
+                "realized": 0.0,
+                "costs": entry_price * levels["quantity"] * rate,
+                "half_done": False,
                 "stop_loss": levels["stop_loss"],
-                "take_profit": levels["take_profit"],
+                "tp1": levels["take_profit_1"],
+                "tp2": levels["take_profit_2"],
+                "tstop_bars": tstop_bars_at(candle.close_time),
+                "setup": setup,
             }
+            result.setups[setup] = result.setups.get(setup, 0) + 1
 
         if position:
             result.open_at_end = 1
         return result
 
+    # ---- [MHF-V3.2-FIVE-ENGINES] محاكاة محفظة حقيقية بقيد ≤3 مراكز متزامنة -------------------
+    def _collect_candidates(self, symbol: str, h4: Sequence[Candle], d1: Sequence[Candle],
+                            btc_d1: Optional[Sequence[Candle]]) -> List[Dict[str, Any]]:
+        """مسح الدخولات المرشحة لرمز واحد بنفس بوابات run_on_data حرفياً (بدون تنفيذ — أحداث فقط)."""
+        if len(h4) < SOP.EMA_SLOW + SOP.BREAKOUT_LOOKBACK + 5:
+            return []
+        trend = self._daily_trend_map(d1)
+        if not trend:
+            return []
+        btc_map = self._daily_trend_map(btc_d1) if btc_d1 else None
+
+        def first_before(ts: int, series) -> Any:
+            state = None
+            for close_time, *vals in series:
+                if close_time <= ts:
+                    state = vals
+                else:
+                    break
+            return state
+
+        storm_windows: List[Tuple[int, bool]] = []
+        moon_windows: List[Tuple[int, bool]] = []
+        if btc_d1:
+            closes_b = [c.close for c in btc_d1]
+            for i, c in enumerate(btc_d1):
+                if i >= 3:
+                    r3 = (closes_b[i] / closes_b[i - 3] - 1) * 100.0
+                    storm_windows.append((c.close_time, bool(getattr(SOP, "CRASH_SENTINEL", False))
+                                          and r3 <= getattr(SOP, "CRASH_BTC_RET3_THRESHOLD", -3.5)))
+                    # [M5-EXTENSION-MEASURED] نفس خريطة التمديد غير العاصف في محاكاة المحفظة
+                    moon_windows.append((c.close_time, bool(getattr(SOP, "TIME_STOP_EXT_ENABLE", False))
+                                         and r3 >= getattr(SOP, "TIME_STOP_EXT_RET3_MIN", -3.0)))
+
+        out: List[Dict[str, Any]] = []
+        start = SOP.EMA_SLOW + SOP.BREAKOUT_LOOKBACK + 1
+        for i in range(start, len(h4)):
+            candle = h4[i]
+            ts = candle.close_time
+            tr = first_before(ts, trend)
+            if not tr or not tr[0]:
+                continue
+            if tr[1] is not None and tr[1] >= SOP.D1_RSI_OVERBOUGHT:
+                continue
+            btm = first_before(ts, btc_map) if btc_map else None
+            if btc_map and not (btm and btm[0]):
+                continue
+            stm = first_before(ts, storm_windows) if storm_windows else None
+            storm = bool(stm[0]) if stm else False
+            mon = first_before(ts, moon_windows) if moon_windows else None
+            moon = bool(mon[0]) if mon else False
+            setup = self._setup_of(h4[: i + 1])
+            if setup is None:
+                continue
+            out.append({"i": i, "ts": ts, "symbol": symbol, "setup": setup,
+                        "storm": storm, "moon": moon, "price": candle.close})
+        return out
+
+    def run_portfolio(self, data_map: Dict[str, Tuple[Sequence[Candle], Sequence[Candle]]],
+                      btc_d1: Optional[Sequence[Candle]] = None) -> Dict[str, Any]:
+        """محاكاة قيد المحفظة الحقيقي: ≤MAX_OPEN_POSITIONS مراكز عبر كل الأزواج + كلفة + بوابات v3.
+
+        شريط H4 الموحد: جميع الأزواج على شبكة زمنية واحدة (مصدر واحد/حدود واحدة) —
+        في كل شريط: إدارة المراكز المفتوحة أولاً (وقفٌ أولاً كالعادة) ثم قبول مرشحين حسب الشاغر.
+        """
+        staged = bool(getattr(SOP, "STAGED_EXITS", False))
+        rate = self._cost_rate()
+        base_tstop_bars = int(getattr(SOP, "TIME_STOP_DAYS", 0) or 0) * 6
+        candidates: Dict[int, List[Dict[str, Any]]] = {}
+        for sym in sorted(data_map.keys()):
+            for cand in self._collect_candidates(sym, data_map[sym][0], data_map[sym][1], btc_d1):
+                candidates.setdefault(cand["i"], []).append(cand)
+        if not candidates:
+            return {"trades": 0, "wins": 0, "scratches": 0, "losses": 0, "pnl_usd": 0.0,
+                    "max_concurrent": 0, "queued_drops": 0, "open_at_end": 0, "log": []}
+
+        open_pos: Dict[str, Dict[str, Any]] = {}
+        max_concurrent = 0
+        queued_drops = 0
+        log_rows: List[Dict[str, Any]] = []
+        totals = {"trades": 0, "wins": 0, "scratches": 0, "losses": 0, "pnl_usd": 0.0}
+        max_i = max(
+            max((len(v[0]) for v in data_map.values()), default=0),
+            max(candidates.keys()) + 1,
+        )
+
+        for i in range(SOP.EMA_SLOW + SOP.BREAKOUT_LOOKBACK + 1, max_i):
+            # -------- إدارة المفتوحة على شريط كل رمز --------
+            for sym in sorted(list(open_pos.keys())):
+                h4 = data_map[sym][0]
+                if i >= len(h4):
+                    continue
+                candle = h4[i]
+                pos = open_pos[sym]
+                res = self._maybe_exit(pos, candle, i, staged, rate)
+                if res is not None:
+                    pnl = self._close_amount(pos, res[0])
+                    totals["trades"] += 1
+                    totals["pnl_usd"] += pnl
+                    totals["wins" if pnl > 0.01 else "losses" if pnl < -0.01 else "scratches"] += 1
+                    log_rows.append({
+                        "entry_ts": pos["entry_time"],
+                        "entry_time": datetime.fromtimestamp(pos["entry_time"] / 1000, tz=timezone.utc).isoformat()[:16],
+                        "exit_time": datetime.fromtimestamp(candle.close_time / 1000, tz=timezone.utc).isoformat()[:16],
+                        "symbol": sym, "entry": round(pos["entry_price"], 8),
+                        "exit": round(res[0], 8), "outcome": res[1],
+                        "setup": pos.get("setup", "breakout"), "pnl_usd": round(pnl, 2),
+                    })
+                    del open_pos[sym]
+            # -------- قبول مرشحي هذا الشريط ضمن الشواغر --------
+            for cand in sorted(candidates.get(i, []), key=lambda c: c["symbol"]):
+                sym = cand["symbol"]
+                if sym in open_pos:
+                    continue  # نفس الرمز: صفقة واحدة في كل مرة (قاعدة محفوظة من run_on_data)
+                h4 = data_map[sym][0]
+                if i >= len(h4):
+                    continue
+                if cand["storm"]:
+                    continue  # محرك التنبؤ بالانهيار: ممنوع حتى مع شاغر
+                if len(open_pos) >= SOP.MAX_OPEN_POSITIONS:
+                    queued_drops += 1
+                    continue
+                levels = RiskManager.compute_levels(cand["price"])
+                mult = getattr(SOP, "MOONSHOT_TSTOP_MULT", 1.0) if cand["moon"] else 1.0
+                open_pos[sym] = {
+                    "entry_time": cand["ts"], "entry_i": i, "entry_price": cand["price"],
+                    "quantity": levels["quantity"], "qty_left": levels["quantity"],
+                    "realized": 0.0, "costs": cand["price"] * levels["quantity"] * rate,
+                    "half_done": False, "stop_loss": levels["stop_loss"],
+                    "tp1": levels["take_profit_1"], "tp2": levels["take_profit_2"],
+                    "tstop_bars": max(1, int(base_tstop_bars * mult)) if base_tstop_bars else 0,
+                    "setup": cand["setup"],
+                }
+                max_concurrent = max(max_concurrent, len(open_pos))
+
+        log("INFO", f"PORTFOLIO-SIM: {totals['trades']} trades, max_concurrent={max_concurrent}, "
+                    f"queued_drops={queued_drops}, pnl={fmt_money(totals['pnl_usd'])}")
+        totals.update({"max_concurrent": max_concurrent, "queued_drops": queued_drops,
+                       "open_at_end": len(open_pos), "log": log_rows})
+        return totals
+
 
 # ==============================================================================
 # SECTION 10 — SELF-TEST (offline, no network)
 # ==============================================================================
+
+
+class RobustnessEngine:
+    """[MHF-V3.2-FIVE-ENGINES] محرك المتانة: حكم خارج-العينة على ثوابت v3 بدل ثقة «داخل العينة».
+
+    قسمة زمنية متتابعة (walk-forward مبسّط): نفس الباكتست بالثوابت الحالية كما هي،
+    وتقسيم الصفقات بالمدخل الزمني entry_ts إلى طيات مستمرة — ثوابت لم تُعاد معايرتها
+    داخل أي طية ⟵ مقاييس الطية اللاحقة اختبار خارج-العينة صادق للتجميد الحالي.
+    """
+
+    @staticmethod
+    def run_walk_forward(data_map: Dict[str, Tuple[Sequence[Candle], Sequence[Candle]]],
+                         btc_d1: Optional[Sequence[Candle]] = None,
+                         folds: int = 3) -> Dict[str, Any]:
+        bt = Backtester(client=None)
+        rows = []
+        for sym in sorted(data_map.keys()):
+            h4, d1 = data_map[sym]
+            r = bt.run_on_data(sym, h4, d1, btc_d1)
+            for t in r.log:
+                rows.append({"pnl_usd": t["pnl_usd"], "entry_ts": t["entry_ts"]})
+        if not rows:
+            return {"folds": [], "verdict": "INSUFFICIENT-DATA", "reason": "no trades"}
+        times = sorted(t["entry_ts"] for t in rows)
+        folds_out = []
+        for k in range(folds):
+            lo = times[int(k * len(times) / folds)]
+            hi = times[min(len(times) - 1, int((k + 1) * len(times) / folds) - 1)] if k < folds - 1 else float("inf")
+            seg = [t for t in rows if lo <= t["entry_ts"] <= hi]
+            wins = sum(1 for t in seg if t["pnl_usd"] > 0.01)
+            losses = sum(1 for t in seg if t["pnl_usd"] < -0.01)
+            folds_out.append({
+                "fold": k + 1, "trades": len(seg), "oos_win": wins,
+                "oos_win_pct": round(wins / len(seg) * 100, 1) if seg else 0.0,
+                "oos_pnl": round(sum(t["pnl_usd"] for t in seg), 2),
+                "oos_losses": losses,
+            })
+        positive_folds = sum(1 for f in folds_out if f["oos_pnl"] > 0.0)
+        verdict = ("ROBUST" if positive_folds == folds else
+                   "ACCEPTABLE" if positive_folds >= folds - 1 else "FRAGILE")
+        return {"folds": folds_out, "positive_folds": positive_folds,
+                "verdict": verdict, "total_trades": len(rows)}
+
+
+class FunnelLedger:
+    """[MHF-V3.2-FIVE-ENGINES] قياس قمع مراحل الفريق حياً ومستداماً — يغلق M1 بالأمام لا بالافتراض.
+
+    سطر JSON لكل مسح (اعدادات مرشحي المراحل 1-3 + وجود إشارة) في ملف بمحاذاة السجل —
+    إحصاءاته تجيب «كم إشارة/يوم فعلاً؟» من الإنتاج مباشرة دون أي إعادة تشغيل تاريخية.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+
+    def record(self, day: str, stage1: int, stage2: int, stage3: int, signal: int) -> None:
+        row = {"day": day, "stage1": stage1, "stage2": stage2, "stage3": stage3, "signal": signal,
+               "ts": time.time()}
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception as e:
+            log("WARN", f"FunnelLedger record failed: {e}")
+
+    def _rows(self) -> List[Dict[str, Any]]:
+        if not os.path.exists(self.path):
+            return []
+        out = []
+        try:
+            with open(self.path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        out.append(json.loads(line))
+        except Exception as e:
+            log("WARN", f"FunnelLedger read failed: {e}")
+        return out
+
+    def stats(self) -> Dict[str, Any]:
+        rows = self._rows()
+        days = sorted({r["day"] for r in rows}) if rows else []
+        signals = sum(int(r.get("signal", 0)) for r in rows)
+        s1 = sum(int(r.get("stage1", 0)) for r in rows)
+        s3 = sum(int(r.get("stage3", 0)) for r in rows)
+        return {
+            "days": len(days),
+            "scans": len(rows),
+            "signals_total": signals,
+            "signals_per_day": round(signals / len(days), 2) if days else 0.0,
+            "stage1_total": s1,
+            "stage3_total": s3,
+            "stage1_to_stage3_pass_rate": round(s3 / s1 * 100, 1) if s1 else 0.0,
+        }
 
 
 def synthetic_series(n: int = 300, start: float = 10.0, drift: float = 0.004,
@@ -1451,6 +2385,9 @@ def synthetic_market(n: int = 1200, seed: int = 7, drift: float = 0.0012,
 
 
 def run_selftest() -> int:
+    # [MHF-V3-UPGRADE] التحققات الرقمية أدناه مطابقة للدستور v2 حرفياً — تثبيت الملف الشخصي قبل أي قياس
+    os.environ["MHF_SOP_PROFILE"] = "v2"
+    _apply_sop_profile()
     print("=" * 78)
     print(" SELF-TEST — offline verification of the strategy engine")
     print("=" * 78)
@@ -1672,7 +2609,7 @@ STRATEGY_TEXT = f"""
 CAPITAL & SIZING
   Account capital ............ {fmt_money(SOP.ACCOUNT_CAPITAL_USD)}
   Position size .............. {fmt_money(SOP.POSITION_SIZE_USD)} per trade (~31.25%)
-  Max risk per trade ......... {fmt_money(SOP.MAX_RISK_PER_TRADE_USD)} (2% of capital)
+  Max risk per trade ......... {fmt_money(SOP.MAX_RISK_PER_TRADE_USD)} ({SOP.MAX_RISK_PER_TRADE_USD / SOP.ACCOUNT_CAPITAL_USD * 100:.1f}% of capital)
   Target profit per trade .... {fmt_money(SOP.TARGET_PROFIT_PER_TRADE_USD)} (R:R = 1:{SOP.RISK_REWARD_RATIO})
   Max concurrent positions ... {SOP.MAX_OPEN_POSITIONS}
   Daily target ............... {fmt_money(SOP.DAILY_TARGET_USD)} (+1%)

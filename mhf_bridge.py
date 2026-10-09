@@ -6,7 +6,7 @@ mhf_bridge.py — [MHF-INTEGRATION] جسر Micro Hedge Fund ⟵⟶ TITAN
   1) تشغيل خط أنابيب micro_hedge_fund (StrategyPipeline) بإيقاع زمني مقيّد
      (افتراضي: مسح كل TITAN_MHF_SCAN_MINUTES دقيقة) بدون LLM خارجي افتراضياً.
   2) تحويل الإشارة المعتمدة إلى مخطط خطط TITAN الورقي/الحقيقي مع ثوابت SOP
-     ($125 حجم مركز من رأس مال $400، SL −6.4% ، TP +19.2%).
+     ($125 حجم مركز من رأس مال $400؛ مستويات SL/TP تُقرأ من ملف SOP الفعّال — v3.3: SL −4.8%/6$ + خروج مدرّج +3.2%/+22.4%).
   3) قيد الصفقة في سجل المحرك (Journal) عند القبول، ومزامنة إغلاقات الحافظة
      الورقية إلى السجل حتى تعمل قاطعات الحماية (3 صفقات كحد أقصى، تعطيل يومي
      −$24 لمدة 24h، قفل شهري +$120).
@@ -87,13 +87,16 @@ class MHFBridge:
         """تحويل إشارة Stage-4 إلى مخطط TITAN (create_open_position / accept_plan)."""
         entry = float(signal["entry_price"])
         tp = float(signal["take_profit"])
-        return {
+        # [MHF-V3-UPGRADE] هدفان مدرّجان عند توفرهما، وإلا الهدف المفرد v2 حرفياً
+        tp1 = float(signal.get("take_profit_1") or tp)
+        tp2 = float(signal.get("take_profit_2") or tp)
+        plan = {
             "ticker": signal["symbol"],
             "signal_price": entry,
             "price": entry,
             "sl": float(signal["stop_loss"]),
-            "tgt1": tp,
-            "tgt2": tp,  # SOP: هدف مفرد +19.2%
+            "tgt1": tp1,
+            "tgt2": tp2,
             "size_pct": MHF_SIZE_PCT,
             "frame": MHF_FRAME,
             "pool": MHF_POOL,
@@ -102,6 +105,11 @@ class MHFBridge:
             "intent": "LIMIT",
             "timestamp": time.time(),
         }
+        if bool(getattr(MHF.SOP, "STAGED_EXITS", False)):
+            # [MHF-V3.2-FIVE-ENGINES] إشارات التعزيز الانفجاري تحمل أياماً ممددة — احترم ما حسمه الفريق
+            plan["time_stop_days"] = int(signal.get("time_stop_days")
+                                         or getattr(MHF.SOP, "TIME_STOP_DAYS", 0) or 0)
+        return plan
 
     def _register_trade(self, signal: dict) -> None:
         """قيد الصفقة المعتمدة في سجل المحرك حتى تعمل قاطعات الحماية."""
