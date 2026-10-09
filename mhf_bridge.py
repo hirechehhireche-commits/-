@@ -103,6 +103,7 @@ class MHFBridge:
             "pool": MHF_POOL,
             "strategy": "micro_hedge_fund",
             "mhf_trade_id": signal.get("id"),
+            "candle_time": signal.get("candle_time") or "",   # [MHF-FINGERPRINT] مفتاح بصمة مستقر
             "intent": "LIMIT",
             "timestamp": time.time(),
         }

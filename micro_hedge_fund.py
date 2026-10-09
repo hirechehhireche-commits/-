@@ -1593,9 +1593,16 @@ class TechnicalAgent:
 
     def analyze(self, symbol: str) -> Dict[str, Any]:
         # [MHF-V3.4-5M-AGGREGATION] قرار الدخول يتغذى من D1/H4 مكوَّنة من 5د (ذيل حي متجدد)
-        d1 = Indicators.analyze_timeframe(self.client.klines_live(symbol, SOP.TF_D1, SOP.KLINE_LIMIT))
-        h4 = Indicators.analyze_timeframe(self.client.klines_live(symbol, SOP.TF_H4, SOP.KLINE_LIMIT))
-        return {"symbol": symbol, "d1": d1, "h4": h4}
+        d1_c = self.client.klines_live(symbol, SOP.TF_D1, SOP.KLINE_LIMIT)
+        h4_c = self.client.klines_live(symbol, SOP.TF_H4, SOP.KLINE_LIMIT)
+        d1 = Indicators.analyze_timeframe(d1_c)
+        h4 = Indicators.analyze_timeframe(h4_c)
+        # [MHF-FINGERPRINT] مفتاح إشارة مستقر: فتح آخر شمعة H4 — إشارة واحدة فقط لكل شمعة
+        bar_open_ms = h4_c[-1].open_time if h4_c else None
+        h4["bar_open_ms"] = bar_open_ms
+        candle_time = (datetime.fromtimestamp(bar_open_ms / 1000, tz=timezone.utc).isoformat()
+                       if bar_open_ms else "")
+        return {"symbol": symbol, "d1": d1, "h4": h4, "candle_time": candle_time}
 
     @staticmethod
     def gate(ta: Dict[str, Any]) -> Tuple[bool, List[str]]:
@@ -1753,6 +1760,8 @@ class RiskManager:
             "id": f"T-{int(time.time() * 1000)}-{candidate['symbol'].replace('USDT', '')}",
             "symbol": candidate["symbol"],
             "direction": "SPOT LONG",
+            # [MHF-FINGERPRINT] مفتاح الإشارة الخارجي المستقر (فتح شمعة الإعداد H4) — منع التكرار مع مسح 5 دقائق
+            "candle_time": (candidate.get("ta") or {}).get("candle_time", ""),
             **levels,
             "quantity": quantity,
             "rationale": {

@@ -2383,6 +2383,10 @@ def run_cycle(reason: str = "scheduled"):
         if MHF_ENABLED and MHF_BRIDGE is not None:
             _mhf_open_syms = [p.get("ticker") for p in st.get("open_positions", []) if p.get("status") == "OPEN"]
             new_buy_plans = MHF_BRIDGE.scan_plans(open_symbols=_mhf_open_syms)
+            # [MHF-FINGERPRINT] بصمة شمعة الإعداد تمنع تكرار إشارات MHF مع مسح 5 دقائق (إشارة واحدة لكل شمعة H4)
+            new_buy_plans, _mhf_dups = filter_new_buy_signals(new_buy_plans)
+            if _mhf_dups:
+                log(f"[FILTER-MHF] { _mhf_dups } إشارة MHF مكررة على نفس الشمعة — تخطي (البصمة صامدة)")
         
         # 🛡️ فحص صمام الأمان والإنقاذ (Fail-Safe Emergency Breaker)
         can_trade, breaker_reason = BREAKER.can_open_new_trade()
