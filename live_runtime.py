@@ -3,6 +3,7 @@
 """
 import hashlib
 import html
+import json
 import os
 import secrets
 import threading
@@ -10,6 +11,7 @@ import time
 from urllib.parse import parse_qs,urlparse
 from live_store import LiveStore
 from live_execution import LiveExecutor
+from decimal import Decimal as D
 
 B=None; STORE=None; EXEC=None
 TOKENS={}; CONFIRMS={}; TOKEN_LOCK=threading.Lock(); RATE={}
@@ -88,6 +90,22 @@ def notifier():
 
 def account(uid):return STORE.account(uid) if STORE else {'credential':None,'enabled':False,'capital':400,'max_order':100,'use_full_balance':False,'positions':{},'halt':None}
 
+# [BAL-CACHE-FIX] صمود الأرصدة تحت موجات الضغط الوزني: لقطة دائمة لآخر جلب ناجح + نافذة 45 ثانية بلا وزن إضافي
+def _bals_cache_get(uid):
+    try:
+        row=STORE.db.execute("SELECT value FROM meta WHERE key=?",(f'last_bals_{uid}',)).fetchone()
+        if not row:return None,None
+        d=json.loads(row[0]);return d.get('ts'),{k:D(str(v)) for k,v in d.get('bals',{}).items()}
+    except Exception:return None,None
+
+def _bals_cache_put(uid,bals):
+    try:
+        with STORE.lock:
+            STORE.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                (f'last_bals_{uid}',json.dumps({'ts':time.time(),'bals':{k:str(v) for k,v in bals.items()}},ensure_ascii=False)))
+            STORE.db.commit()
+    except Exception:pass
+
 def panel(u):
     a=account(u['id']);active=EXEC.active(a) if EXEC else []
     venue=STORE.venue if STORE else os.environ.get('BINANCE_ENV','live')
@@ -103,7 +121,12 @@ def panel(u):
     trade_icon = "🟢 مفعّل" if a.get('enabled') else "🔴 متوقف"
     if a.get('credential') and EXEC:
         try:
-            _bals = EXEC.client(a).balances()
+            _ts, _cached = _bals_cache_get(u['id'])
+            if _cached is not None and _ts and time.time() - _ts < 45:
+                _bals = _cached  # حديثة (<45 ث) — صفر وزن إضافي على Binance
+            else:
+                _bals = EXEC.client(a).balances()
+                _bals_cache_put(u['id'], _bals)
             total_eq, free, used = EXEC.get_total_equity(a, EXEC.client(a), cached_bals=_bals)
             equity_info = (
                 f"━━━━━━━━━━━━━━\n"
@@ -112,9 +135,20 @@ def panel(u):
                 f"• الحر: {free:.2f} | المستخدم: {used:.2f}\n"
             )
         except Exception as _e:
-            # [BAL-DISPLAY-FIX] لا أصفار كاذبة بعد الآن: فشل الجلب يظهر سبباً حقيقياً وليس رقماً وهمياً
+            # فشل الجلب: أظهر آخر قراءة ناجحة بعمرها إن وُجدت — وإلا السبب الحقيقي فقط
             B.log(f'[BAL] تعذر جلب رصيد لوحة الحساب {u.get("id")}: {_e}')
-            equity_info = f"━━━━━━━━━━━━━━\n⚠️ تعذّر جلب رصيدك الآن — السبب: {B.esc(str(_e)[:200])}\n"
+            _ts, _cached = _bals_cache_get(u['id'])
+            if _cached:
+                total_eq, free, used = EXEC.get_total_equity(a, EXEC.client(a), cached_bals=_cached)
+                equity_info = (
+                    f"━━━━━━━━━━━━━━\n"
+                    f"💼 آخر قراءة رصيد ناجحة (منذ {int((time.time()-_ts)//60)} د):\n"
+                    f"• الإجمالي: <b>{total_eq:.2f} USDT</b>\n"
+                    f"• الحر: {free:.2f} | المستخدم: {used:.2f}\n"
+                    f"⚠️ الجلب المباشر فشل حالياً: {B.esc(str(_e)[:160])}\n"
+                )
+            else:
+                equity_info = f"━━━━━━━━━━━━━━\n⚠️ تعذّر جلب رصيدك الآن — السبب: {B.esc(str(_e)[:200])}\n"
     # نص مختصر وصادق يطابق الواقع
     if not a.get('credential'):
         return (
@@ -396,10 +430,18 @@ def callback(cb,u):
         elif data=='api:bal':
             try:
                 bals=EXEC.client(account(uid)).balances()
+                _bals_cache_put(uid, bals)
             except Exception as _be:
-                # [BAL-FIX] اعرض سبب الفشل الحقيقي — "لا يمكن الجلب" ≠ "حساب فارغ"
+                # [BAL-FIX]+[BAL-CACHE-FIX] اعرض آخر قراءة ناجحة بعمرها إن وجدت، ثم السبب الحقيقي — "لا يمكن الجلب الآن" ≠ "حساب فارغ"
                 B.log(f'[BAL] تعذر جلب أرصدة الحساب {uid}: {_be}')
-                B.respond_cb(cb, f'⚠️ {B.esc(str(_be)[:500])}', keyboard(u))
+                _ts, _cached = _bals_cache_get(uid)
+                if _cached:
+                    lines = ['💼 <b>آخر قراءة أرصدة ناجحة</b> (منذ ' + str(int((time.time()-_ts)//60)) + ' د):']
+                    lines += [f'{B.esc(s)}: {v}' for s,v in sorted(_cached.items()) if v>0 and (v >= D('0.0001') or s in ('USDT','BTC','ETH','BNB','SOL'))]
+                    lines.append(f'⚠️ الجلب المباشر فشل حالياً: {B.esc(str(_be)[:300])}')
+                    B.respond_cb(cb, '\n'.join(lines)[:3800], keyboard(u))
+                else:
+                    B.respond_cb(cb, f'⚠️ {B.esc(str(_be)[:500])}', keyboard(u))
                 return
             pos_text = '\n'.join(f'{B.esc(s)}: {q}' for s,q in sorted(bals.items()) if q>0 and (q >= 0.0001 or s in ('USDT','BTC','ETH','BNB','SOL')))
             text = '💼 <b>الأرصدة الحرة على Binance</b>\n' + (pos_text if pos_text else '• لا توجد أرصدة حرة تفوق الصفر حالياً.')
