@@ -139,6 +139,44 @@ class LiveExecutor:
             except: pass
             raise
 
+    @staticmethod
+    def _base_asset(symbol):
+        return symbol[:-4] if symbol.endswith('USDT') else symbol
+
+    @staticmethod
+    def _is_insufficient(e):
+        s=str(e).lower()
+        return getattr(e,'code',None)==-2010 or '-2010' in s or 'insufficient' in s
+
+    # [LIVE-RECONCILE] تسوية تدخل المستخدم بالرصيد: سحب الأصل أو بيعه جزئياً/كلياً يدوياً ⟵ يكمل بالمتاح، لا يوقف الحساب، ولا يرفع أبداً
+    def _reconcile_user_drift(self,a,c,p,bals=None):
+        if p['state']!='OPEN' or p.get('exit'):return True
+        try:
+            if bals is None and hasattr(c,'balances_full'):bals=c.balances_full()
+            row=(bals or {}).get(self._base_asset(p['symbol']))
+            if not isinstance(row,dict):return True                 # لا قراءة موثوقة — لا نخمّن؛ التتبع الأصلي مستمر
+            avail=D(str(row.get('free',0)))+D(str(row.get('locked',0)))
+            tracked=D(p['qty']);lot=c.rules(p['symbol'])['filters']['LOT_SIZE']
+            tol=max(D(lot.get('stepSize','0.00001')),D('0.00000001'))
+            if avail>=tracked-tol:return True                       # لا انحراف حقيقي (فرق غبار يتسامح)
+            old=tracked
+            if p.get('stop_cid'):                                   # ألغِ وقفنا القائم بصمت — سيعاد بكمية المتاح
+                try:c.cancel(p['symbol'],p['stop_cid'])
+                except Exception:pass
+                p['stop_cid']=None
+            min_q=max(D(lot.get('minQty','0.00001')),tol)
+            if avail<min_q:
+                p['qty']='0';p['state']='CLOSED';p['closed_reason']='USER_EXIT';self.store.save(a)
+                self.store.notify(a['uid'],p['id']+':user-exit',
+                    f"💵 {p['symbol']}: تدخل يدوي — لم يعد الأصل متاحاً كافياً بالحساب (سحبت أو بعت يدوياً). سُجّل إغلاقاً يدوياً بلا أي أوامر إضافية، والحساب يكمل التداول بالرصيد المتوفر.")
+                return False
+            adj=dec(c.quantity(p['symbol'],avail,c.price(p['symbol']),True))
+            p['qty']=adj;self.store.save(a)
+            self.store.notify(a['uid'],p['id']+':user-partial',
+                f"✋ {p['symbol']}: تدخل يدوي — المتاح الآن {adj} من أصل {old}. كيّفت حماية الوقف والأهداف على المتاح وواصلت الإدارة بلا توقف.")
+            return True
+        except Exception:return True                                # المصالحة لا ترفع أبداً — استمرارية التشغيل أولاً
+
     def query_known(self,a,client,cid,symbol):
         response=client.query(symbol,cid)
         if response is None:raise ExchangeError('ORDER_NOT_RESOLVED',True)
@@ -267,6 +305,13 @@ class LiveExecutor:
             elif r['status'] in TERMINAL:
                 raise ValueError('لم يقبل Binance أمر الحماية؛ راجع المركز')
         except ExchangeError as e:
+            if not e.uncertain and self._is_insufficient(e):
+                # [LIVE-RECONCILE] كمية الوقف تتجاوز رصيد الأصل (سحب/بيع يدوي) — سوِّ بلا إسقاط للحساب
+                self._reconcile_user_drift(a,c,p)
+                if p['state']=='OPEN':
+                    try:self._protect(a,c,p)
+                    except Exception:pass
+                return
             if not e.uncertain:
                 p['stop_cid']=None;self.store.save(a)
                 self._start_exit(a,c,p,'SAFETY',1.0)
@@ -324,6 +369,13 @@ class LiveExecutor:
         try:
             r=self.order(a,c,x['cid'],params)
         except ExchangeError as e:
+            if not e.uncertain and self._is_insufficient(e):
+                # [LIVE-RECONCILE] البيع يتجاوز ما بقي من الأصل (خرج المستخدم قبل البوت) — سوِّ وألغِ جلسة الخروج دون توقف
+                p['exit']=None;p['state']='OPEN';self.store.save(a)
+                if self._reconcile_user_drift(a,c,p) and p['state']=='OPEN':
+                    try:self._protect(a,c,p)
+                    except Exception:pass
+                return
             if not e.uncertain:
                 p['exit']=None
                 p['state']='MANUAL' if x['kind']=='SAFETY' else 'OPEN'
@@ -506,8 +558,13 @@ class LiveExecutor:
                         r=c.query(row['symbol'],row['cid'])
                         if r is not None:self.store.order_result(a['uid'],row['cid'],'ACK',r)
                     except Exception:pass
+                # [LIVE-RECONCILE] لقطة أرصدة واحدة لكل تكة: كشف تدخل المستخدم (سحب/بيع يدوي) قبل أي قرار حماية
+                bals=None
+                try:bals=c.balances_full() if hasattr(c,'balances_full') else None
+                except Exception:bals=None
                 for p in list(self.active(a)):
                     try:
+                        if not self._reconcile_user_drift(a,c,p,bals):continue
                         self._poll_position(a,c,p,time.time())
                     except ExchangeError as e:
                         if not e.uncertain:

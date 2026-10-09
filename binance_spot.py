@@ -212,6 +212,21 @@ class BinanceSpot:
             raise ValueError('سيرفر البوت محجوب جغرافياً من Binance (451: restricted location) — الأرصدة الموقّعة لا تُقرأ من هذا الـ IP أياً كانت المفاتيح. الحل: انشر الخدمة في منطقة مدعومة (فرانكفورت / أوروبا) ثم أعد المحاولة — رصيدك لم يتغير.')
         raise ValueError(f'تعذّر جلب أرصدة Binance حالياً (آخر فشل: {str(last_err)[:100]}) — رصيدك الحقيقي لم يتغير؛ جرّب الزر بعد دقيقة. إن تكرر الخطأ فالسبب غالباً ضغط الـ IP المشترك للخادم على Binance.')
 
+    def balances_full(self):
+        # [LIVE-RECONCILE] عقد balances() نفسه لكن يفصل free/locked — ضروري لتمييز محجوزات أوامرنا من تدخل المستخدم
+        mirrors = list(dict.fromkeys([self.base] + self.ENDPOINTS))
+        last_err = None
+        for ep in mirrors:
+            self.base = ep
+            try:
+                res = self.request('GET', '/api/v3/account')
+                if isinstance(res, dict) and 'balances' in res:
+                    return {x['asset']: {'free': D(x['free']), 'locked': D(x['locked'])} for x in res['balances']}
+            except Exception as e:
+                last_err = e
+                continue
+        raise ValueError(f'تعذّر جلب الأرصدة التفصيلية ({str(last_err)[:60]})')
+
     def price(self, symbol):
         # استخدام vision أولاً لتوفير وزن طلبات التداول والحفاظ على استقرار السيرفر
         try:
