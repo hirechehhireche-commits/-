@@ -210,6 +210,16 @@ WHITELIST: Tuple[str, ...] = (
 )
 
 BINANCE_BASE = os.getenv("BINANCE_BASE_URL", "https://api.binance.com")
+
+# [MIR-5] مرايا المستهلك العام: حظر جغرافي (451) أو ضغط (418/429) أو تعطل ينتقل تلقائياً حتى vision
+PUBLIC_ENDPOINTS = [
+    BINANCE_BASE,
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com",
+    "https://api4.binance.com",
+    "https://data-api.binance.vision",
+]
 POLLINATIONS_URL = "https://text.pollinations.ai/openai"
 JOURNAL_PATH = os.getenv("JOURNAL_PATH", "trade_journal_py.json")
 
@@ -535,6 +545,8 @@ class BinanceClient:
         self._last_call = 0.0
         self._ctx = ssl.create_default_context()
         self._filters_cache: Dict[str, Dict[str, Any]] = {}
+        self._good_host: Optional[str] = None        # [MIR-5] آخر مرآة صالحة يبدأ منها النداء
+        self._poisoned: Dict[str, float] = {}        # [MIR-5] مرآة مريضة → حين انتهاء التسمّم (unix)
 
     def _throttle(self) -> None:
         delta = time.time() - self._last_call
@@ -542,27 +554,42 @@ class BinanceClient:
             time.sleep(self.spacing - delta)
         self._last_call = time.time()
 
+    def _mirror_order(self) -> List[str]:
+        # [MIR-5] ترتيب جولة مرايا: تبدأ بآخر مرآة صالحة وتتخطى المسمّمة (تسمّم 3 دقائق)
+        now = time.time()
+        fresh = [h for h in PUBLIC_ENDPOINTS if now >= self._poisoned.get(h, 0.0)]
+        if self._good_host in fresh:
+            fresh.remove(self._good_host)
+            fresh.insert(0, self._good_host)
+        return fresh or list(PUBLIC_ENDPOINTS)
+
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None, retries: int = 3) -> Any:
         query = urllib.parse.urlencode(params or {})
-        url = f"{self.base_url}{path}" + (f"?{query}" if query else "")
         last_error: Optional[str] = None
 
-        for attempt in range(1, retries + 1):
+        for host in self._mirror_order():  # [MIR-5] جولة مرايا بلا نقطة فشل مفردة للجلب العام
+            url = f"{host}{path}" + (f"?{query}" if query else "")
             self._throttle()
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "micro-hedge-fund-strategy/1.0"})
                 with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as resp:
+                    self._good_host = host
                     return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:  # 4xx/5xx
                 body = exc.read().decode("utf-8", "ignore")[:200]
                 last_error = f"HTTP {exc.code}: {body}"
-                if exc.code in (429, 418) or exc.code >= 500:
-                    time.sleep(0.5 * 2 ** (attempt - 1))
-                    continue
-                break
+                if exc.code in (451, 429, 418) or exc.code >= 500:
+                    self._poisoned[host] = time.time() + 180.0
+                    if self._good_host == host:
+                        self._good_host = None
+                    continue  # مرآة تالية بدل إهدار المحاولات على مضيف مريض
+                break  # 4xx غير حجبية (أخطاء طلبات) — سلوك قديم: فشل مباشر
             except Exception as exc:  # network / timeout
                 last_error = str(exc)
-                time.sleep(0.5 * 2 ** (attempt - 1))
+                self._poisoned[host] = time.time() + 180.0
+                if self._good_host == host:
+                    self._good_host = None
+                continue
 
         raise BinanceError(f"GET {path} failed: {last_error}")
 

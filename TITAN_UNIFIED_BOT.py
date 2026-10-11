@@ -202,7 +202,7 @@ DELISTED_OR_INACTIVE = {
 SIGNAL_BOT_VERSION = "بوت تداول هادئ"
 BOT_VERSION = "بوت تداول طيب - نسخة صادقة"
 # [MHF-INTEGRATION] وسم بناء مرئي — أثبت للمستخدم في الواجهة أن النسخة المنشورة حديثة بالفعل
-BUILD_TAG = "MHF-UI v2.4 · 2026-10-09"
+BUILD_TAG = "MHF-UI v2.5 · 2026-10-10 · JUGG+MIR5"
 STRATEGY_ID = "micro-hedge-fund"
 STRATEGY_PROVENANCE = "Micro Hedge Fund — SOP $125/$400/$8/$24 (تأكيد ثلاثي D1/H4)"
 
@@ -225,6 +225,7 @@ POOL_WEIGHT_OF_TOTAL = {"P1": 0.35, "P2": 0.15, "P3": 0.12, "S2": 0.20, "GS": 0.
 
 # [MHF-INTEGRATION] جسر Micro Hedge Fund — المصدر الوحيد لخطط الدخول (TITAN_MHF=0 للتعطيل الكامل والرجوع للمحرك القديم)
 MHF_ENABLED = (os.environ.get("TITAN_MHF", "1").strip() != "0")
+JUGG_ENABLED = (os.environ.get("TITAN_JUGG", "1").strip() == "1")  # [JUGG-WAKE] المصدر التراثي V5-ULTRA بشهادته 5Y/OOS الموجبة
 MHF_BRIDGE = None
 MHF_WHITELIST_N = 0
 if MHF_ENABLED:
@@ -2388,6 +2389,20 @@ def run_cycle(reason: str = "scheduled"):
             if _mhf_dups:
                 log(f"[FILTER-MHF] { _mhf_dups } إشارة MHF مكررة على نفس الشمعة — تخطي (البصمة صامدة)")
         
+        # [JUGG-WAKE] المصدر التراثي V5-ULTRA (شهادة +1638%/DD21/Sharpe على 5Y بإفصاح حوكمي) — خطط يومية بجانب MHF
+        if JUGG_ENABLED and HAS_V127:
+            try:
+                _jugg_plans = eval_4h_juggernaut_strategy(now_cycle) or []
+                if _jugg_plans:
+                    _jugg_new, _jugg_dups = filter_new_buy_signals(_jugg_plans)
+                    if _jugg_dups:
+                        log(f"[FILTER-JUGG] {_jugg_dups} إشارة تراث مكررة على نفس شمعة 4H — تخطي (البصمة مشتركة)")
+                    if _jugg_new:
+                        new_buy_plans = (new_buy_plans or []) + _jugg_new
+                        log(f"[JUGG] {len(_jugg_new)} خطة V5-ULTRA جديدة دُمجت بمسار القبول")
+            except Exception as _jugg_e:  # التراث لا يمثل سبباً لإسقاط الدورة أبداً
+                log(f"[JUGG EVAL ERROR] {_jugg_e}")
+
         # 🛡️ فحص صمام الأمان والإنقاذ (Fail-Safe Emergency Breaker)
         can_trade, breaker_reason = BREAKER.can_open_new_trade()
         if not can_trade:
